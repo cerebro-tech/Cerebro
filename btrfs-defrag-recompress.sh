@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
 
-# This script defragments and recompresses Btrfs subvolumes, skipping problematic dirs.
+# This script defragments and recompresses Btrfs subvolumes.
 
-TARGET="/"
+# Subvolumes
+SUBVOLUMES=(
+    "/"        # root
+    "/home"    # home
+    "/var/log" # log
+)
 
-# Directories to exclude (space-separated)
-EXCLUDES=("/home/$USER/.gnupg" "/home/$USER/.pki")
+for TARGET in "${SUBVOLUMES[@]}"; do
+    echo "Processing: $TARGET"
 
-echo "Defragmenting and recompressing: $TARGET"
-for EXCLUDE in "${EXCLUDES[@]}"; do
-    echo "Excluding: $EXCLUDE"
+    # Determine compression type
+    if [[ "$TARGET" == "/" ]]; then
+        COMP_TYPE="zstd"
+    else
+        COMP_TYPE="lzo"
+    fi
+
+    echo "Defragmenting and recompressing: $TARGET with $COMP_TYPE"
+    sudo btrfs filesystem defragment -r -c"$COMP_TYPE" "$TARGET" || echo "Some files may be busy and will be skipped."
+
+    echo "----------------------------------------"
 done
 
-sudo btrfs filesystem defragment -r -clzo "$TARGET" \
-    $(for d in "${EXCLUDES[@]}"; do echo "--exclude=$d"; done)
-
-echo "Done!"
+echo "All done!"
