@@ -1,7 +1,29 @@
 First Backup: Date: 2025-06-04, Time: 23:20:31, Size: 
-Last Backup: Date: 2025-06-05, Time: 00:01:16, Size: 6.4G
-Core Backup: Date: 2025-06-05, Time: 00:01:16, Size: 6.4G
-Total Backups Created: 10
-Total Internal Snapshots: 3
-Total External Backups: 2
+Last Backup: Date: 2025-06-05, Time: 23:48:20, Size: 6.4G
+Core Backup: Date: 2025-06-05, Time: 18:14:36, Size: 6.4G
+Total Backups Created: 25
+Total Internal Snapshots: 2
+Total External Backups: 0
 How long with U: 1 days
+
+=== Backup Metrics Summary ===
+First Backup: Date: 2025-06-04,, Time: Time:, Size: 
+Last Backup: Date: 2025-06-05, Time: 23:57:57, Size: 6.87GiB
+Core Backup: Date: 2025-06-05, Time: 23:57:57, Size: 6.87GiB
+Total Backups Created: 0
+Total Internal Snapshots: 2
+Total External Backups: 0
+How long with U: 0 days
+Backup Duration: 0 seconds
+
+
+=== Backup Metrics Summary ===
+First Backup: Date: 2025-06-04,, Time: Time:, Size: 
+Last Backup: Date: 2025-06-06, Time: 00:13:14, Size: 6.87GiB
+Core Backup: Date: 2025-06-06, Time: 00:13:14, Size: 6.87GiB
+Total Backups Created: 0
+Total Internal Snapshots: 2
+Total External Backups: 1
+How long with U: 0 days
+Backup Duration: 881 seconds
+
