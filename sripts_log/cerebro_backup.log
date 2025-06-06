@@ -65,3 +65,67 @@ Total Backups Created: 3
 Total Internal Snapshots: 3
 Total External Backups: 1
 How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 16:04:17, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 16:04:31, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 2
+How long with U: 1 days
+
+=== Backup Metrics Summary ===
+Date: 2025-06-06, Time: 16:11:09, Size: 6703
+Total Backups Created: 4
+Total Internal Snapshots: 4
+Total External Backups: 0
+How long with U: 3 days
+Backup Duration: 1 seconds
+
+=== Backup Metrics Summary ===
+Date: 2025-06-06, Time: 16:11:24, Size: 6704
+Total Backups Created: 4
+Total Internal Snapshots: 4
+Total External Backups: 0
+How long with U: 3 days
+Backup Duration: 1 seconds
+
+=== Backup Metrics Summary ===
+Date: 2025-06-06, Time: 16:11:52, Size: 6705
+Total Backups Created: 4
+Total Internal Snapshots: 4
+Total External Backups: 0
+How long with U: 3 days
+Backup Duration: 0 seconds
+
+=== Backup Metrics Summary ===
+Date: 2025-06-06, Time: 16:12:54, Size: 6707
+Total Backups Created: 4
+Total Internal Snapshots: 4
+Total External Backups: 0
+How long with U: 3 days
+Backup Duration: 1 seconds
+
+=== Backup Metrics Summary ===
+Date: 2025-06-06, Time: 16:13:14, Size: 6708
+Total Backups Created: 4
+Total Internal Snapshots: 4
+Total External Backups: 0
+How long with U: 3 days
+Backup Duration: 1 seconds
+Last Backup: Date: 2025-06-06, Time: 16:15:19, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 16:15:22, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 2
+How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 16:16:58, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 16:17:01, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 2
+How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 16:29:14, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 16:29:17, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 2
+How long with U: 1 days

@@ -62,11 +62,8 @@ function remove_old_backups() {
 
 function print_backup_metrics() {
   echo
-  echo "=== Backup Metrics Summary ==="
-  get_first_backup_info
-  get_last_backup_info
-  get_core_backup_info
-  get_metrics_summary
+  echo "=== Backup Metrics Summary (Last Entry Only) ==="
+  tail -n 8 "$LOG_FILE"
   echo "Backup Duration: $BACKUP_DURATION seconds"
 }
 
@@ -143,7 +140,7 @@ function main() {
         else
           echo "[chafa not found, skipping animation]"
         fi
-        echo "Ho-Ho-ho-hooooo FU )) U havent space.. but u should know magic word motfacr))))"
+        echo "Ho-Ho-ho-ho.. FU =)) U haven't FREE space for this.. but U should know a magic word motherfacker =))"
       fi
     else
       remove_old_snapshots "$ext_btrfs_snapshots_dir" "$CORE_SNAP_NAME" "$fresh_snap_name"
