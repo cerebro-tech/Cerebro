@@ -1,107 +1,186 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
-# === Setup ===
+LOG_DIR="/home/j/my_scripts/sripts_log"
+LOG_FILE="$LOG_DIR/cerebro_backup.log"
+SCRIPT_DIR="/home/j/my_scripts/Do_Backup"
+MINION_GIF="/home/j/my_scripts/gif/minon.gif"
 CORE_SNAP_NAME="snap_core"
-LOG_FILE="/home/j/my_scripts/sripts_log/cerebro_backup.log"
-SNAPSHOT_DIR="/.snapshots"
-MOUNT_DIR="/run/media/j"
-EXTERNAL_BKP_DIR_NAME="dobackup"
-BOOT_PARTITION="/boot"
 
-# Ensure log file exists
-[[ -f "$LOG_FILE" ]] || touch "$LOG_FILE"
+mkdir -p "$LOG_DIR"
 
-# Determine mode
-if [[ "${1:-}" == "core" ]]; then
-  SNAP_NAME="$CORE_SNAP_NAME"
-  echo "[$(date +'%F %T')] Running in CORE mode: $SNAP_NAME"
-else
-  SNAP_NAME="snap_$(date +'%Y-%m-%d')"
-  echo "[$(date +'%F %T')] Running in NORMAL mode: $SNAP_NAME"
-fi
+function log() {
+  echo "[$(date +'%F %T')] $*"
+}
 
-echo "[$(date +'%F %T')] Starting backup script..."
+function get_first_backup_info() {
+  grep '^First Backup:' "$LOG_FILE" 2>/dev/null || echo "First Backup: Date: -, Time: -, Size: -"
+}
 
-# === Create new read-only snapshot ===
-echo "[$(date +'%F %T')] Creating new read-only Btrfs snapshot: $SNAP_NAME"
-btrfs subvolume delete "$SNAPSHOT_DIR/$SNAP_NAME" &>/dev/null || true
-btrfs subvolume snapshot -r / "$SNAPSHOT_DIR/$SNAP_NAME"
-echo "[$(date +'%F %T')] Snapshot $SNAP_NAME created in $SNAPSHOT_DIR"
+function get_last_backup_info() {
+  grep '^Last Backup:' "$LOG_FILE" 2>/dev/null || echo "Last Backup: Date: -, Time: -, Size: -"
+}
 
-# === Find external Btrfs device with dobackup dir ===
-EXTERNAL_DEV=""
-for dev in "$MOUNT_DIR"/*; do
-  if [[ -d "$dev/$EXTERNAL_BKP_DIR_NAME" ]]; then
-    if [[ $(stat -f -c %T "$dev") == "btrfs" ]]; then
-      EXTERNAL_DEV="$dev"
-      echo "[$(date +'%F %T')] Found external device: $EXTERNAL_DEV"
-      break
-    fi
+function get_core_backup_info() {
+  grep '^Core Backup:' "$LOG_FILE" 2>/dev/null || echo "Core Backup: Date: -, Time: -, Size: -"
+}
+
+function get_metrics_summary() {
+  grep -E 'Total Backups Created|Total Internal Snapshots|Total External Backups|How long with U' "$LOG_FILE" 2>/dev/null || echo "Metrics: N/A"
+}
+
+function get_backup_size() {
+  local path=$1
+  if [[ -e $path ]]; then
+    du -sh "$path" 2>/dev/null | cut -f1
+  else
+    echo "-"
   fi
-done
+}
 
-if [[ -z "$EXTERNAL_DEV" ]]; then
-  echo "[$(date +'%F %T')] No mounted external device with Btrfs under $MOUNT_DIR."
-else
-  # Check free space
-  FREE_SPACE=$(df --output=avail "$EXTERNAL_DEV" | tail -1)
-  SNAP_SIZE=$(btrfs subvolume show "$SNAPSHOT_DIR/$SNAP_NAME" | grep -i "Generation" | awk '{print $2}')
+function free_space_kb() {
+  df --output=avail -k "$1" 2>/dev/null | tail -1
+}
 
-  # If not enough space, overwrite core if dobackup core
-  if [[ "$FREE_SPACE" -lt 1048576 ]]; then
-    if [[ "${1:-}" == "core" ]]; then
-      echo "[$(date +'%F %T')] Not enough space. Rewriting core snapshot only."
+function remove_old_snapshots() {
+  local target_dir=$1
+  local keep_core=$2
+  local keep_fresh=$3
+
+  find "$target_dir" -mindepth 1 -maxdepth 1 -type d ! -name "$keep_core" ! -name "$keep_fresh" -exec btrfs subvolume delete {} + 2>/dev/null || true
+}
+
+function remove_old_backups() {
+  local backup_dir=$1
+  local keep_core=$2
+  local keep_fresh=$3
+
+  find "$backup_dir" -maxdepth 1 -type f ! -name "$keep_core" ! -name "$keep_fresh" -exec rm -f {} + 2>/dev/null || true
+}
+
+function print_backup_metrics() {
+  echo
+  echo "=== Backup Metrics Summary ==="
+  get_first_backup_info
+  get_last_backup_info
+  get_core_backup_info
+  get_metrics_summary
+  echo "Backup Duration: $BACKUP_DURATION seconds"
+}
+
+function main() {
+  local mode="${1:-normal}"
+  local start_time=$(date +%s)
+
+  if [[ "$mode" == "core" ]]; then
+    SNAP_NAME="$CORE_SNAP_NAME"
+    log "Running in CORE mode: $SNAP_NAME"
+  else
+    SNAP_NAME="snap_$(date +'%Y-%m-%d')"
+    log "Running in NORMAL mode: $SNAP_NAME"
+  fi
+
+  if [[ -d "/.snapshots/$SNAP_NAME" ]]; then
+    log "Removing existing internal snapshot: $SNAP_NAME"
+    sudo btrfs subvolume delete "/.snapshots/$SNAP_NAME"
+  fi
+
+  log "Creating new read-only Btrfs snapshot: $SNAP_NAME"
+  sudo btrfs subvolume snapshot -r / "/.snapshots/$SNAP_NAME"
+  log "Snapshot $SNAP_NAME created in /.snapshots"
+
+  local ext_dev=""
+  local ext_btrfs_snapshots_dir=""
+  for mount_point in /run/media/j/*; do
+    if [[ -d "$mount_point/dobackup" ]]; then
+      local fs_type=$(findmnt -n -o FSTYPE --target "$mount_point")
+      if [[ "$fs_type" == "btrfs" ]]; then
+        ext_dev="$mount_point"
+        ext_btrfs_snapshots_dir="$ext_dev/dobackup/btrfs_snapshots"
+        break
+      fi
+    fi
+  done
+
+  if [[ -z "$ext_dev" ]]; then
+    log "No mounted external device with btrfs and 'dobackup' folder found, skipping external backup"
+  else
+    local EXT_FREE
+    EXT_FREE=$(free_space_kb "$ext_dev")
+
+    mkdir -p "$ext_btrfs_snapshots_dir"
+
+    local fresh_snap_name="snap_$(date +'%Y-%m-%d')"
+    local fresh_exists=0
+    if [[ -d "$ext_btrfs_snapshots_dir/$fresh_snap_name" ]]; then
+      fresh_exists=1
+    fi
+
+    local core_exists=0
+    if [[ -d "$ext_btrfs_snapshots_dir/$CORE_SNAP_NAME" ]]; then
+      core_exists=1
+    fi
+
+    local SIZE_THRESHOLD=1048576
+
+    if (( EXT_FREE < SIZE_THRESHOLD )); then
+      if [[ "$mode" == "core" ]]; then
+        log "Not enough space on external device. Rewriting core snapshot only."
+        if [[ $core_exists -eq 1 ]]; then
+          sudo btrfs subvolume delete "$ext_btrfs_snapshots_dir/$CORE_SNAP_NAME"
+        fi
+        log "Sending core snapshot to external device..."
+        sudo btrfs send "/.snapshots/$SNAP_NAME" | sudo btrfs receive "$ext_btrfs_snapshots_dir"
+      else
+        if command -v chafa &>/dev/null; then
+          chafa --animate=on "$MINION_GIF" &
+          CHAFAPID=$!
+          sleep 3
+          kill "$CHAFAPID" 2>/dev/null || true
+          wait "$CHAFAPID" 2>/dev/null || true
+        else
+          echo "[chafa not found, skipping animation]"
+        fi
+        echo "Ho-Ho-ho-hooooo FU )) U havent space.. but u should know magic word motfacr))))"
+      fi
     else
-      echo "Ho-Ho-ho-hooooo FU )) U havent space.. but u should know magic word motfacr))))"
-      exit 1
+      remove_old_snapshots "$ext_btrfs_snapshots_dir" "$CORE_SNAP_NAME" "$fresh_snap_name"
+
+      if [[ $fresh_exists -eq 1 ]]; then
+        sudo btrfs subvolume delete "$ext_btrfs_snapshots_dir/$fresh_snap_name"
+      fi
+
+      log "Sending fresh snapshot $fresh_snap_name to external device..."
+      sudo btrfs send "/.snapshots/$SNAP_NAME" | sudo btrfs receive "$ext_btrfs_snapshots_dir"
+
+      local boot_src="/boot/"
+      local boot_dst="$ext_dev/dobackup/boot_backup"
+
+      mkdir -p "$boot_dst"
+      log "Backing up /boot to external device via rsync..."
+      rsync -a --info=progress2 "$boot_src" "$boot_dst"
     fi
   fi
 
-  # Delete oldest backup if > 2 backups exist
-  SNAPSHOT_LIST=($(ls -t "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME"))
-  if [[ ${#SNAPSHOT_LIST[@]} -ge 2 ]]; then
-    OLDEST="${SNAPSHOT_LIST[-1]}"
-    echo "[$(date +'%F %T')] Removing oldest external snapshot: $OLDEST"
-    btrfs subvolume delete "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME/$OLDEST"
-  fi
+  local end_time=$(date +%s)
+  BACKUP_DURATION=$((end_time - start_time))
 
-  # Create new snapshot on external
-  echo "[$(date +'%F %T')] Sending snapshot to external device..."
-  btrfs send "$SNAPSHOT_DIR/$SNAP_NAME" | pv -s 1G | btrfs receive "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME"
-  echo "[$(date +'%F %T')] Snapshot $SNAP_NAME sent to $EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME"
+  {
+    if ! grep -q '^First Backup:' "$LOG_FILE" 2>/dev/null; then
+      echo "First Backup: Date: $(date +'%F'), Time: $(date +'%T'), Size: $(get_backup_size '/.snapshots')"
+    fi
+    echo "Last Backup: Date: $(date +'%F'), Time: $(date +'%T'), Size: $(get_backup_size '/.snapshots')"
+    echo "Core Backup: Date: $(date +'%F'), Time: $(date +'%T'), Size: $(get_backup_size '/.snapshots/snap_core')"
+    echo "Total Backups Created: $(find /.snapshots -mindepth 1 -maxdepth 1 -type d | wc -l)"
+    echo "Total Internal Snapshots: $(find /.snapshots -mindepth 1 -maxdepth 1 -type d | wc -l)"
+    echo "Total External Backups: $( [[ -d "$ext_btrfs_snapshots_dir" ]] && find "$ext_btrfs_snapshots_dir" -mindepth 1 -maxdepth 1 -type d | wc -l || echo 0 )"
+    echo "How long with U: $(( ( $(date +%s) - $(date -d "$(stat -c %y /etc/passwd)" +%s) ) / 86400 )) days"
+  } >>"$LOG_FILE"
 
-  # Rsync /boot if needed
-  if [[ -d "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME/boot_backup" ]]; then
-    echo "[$(date +'%F %T')] Syncing /boot to external device..."
-    rsync -a --info=progress2 --delete "$BOOT_PARTITION/" "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME/boot_backup/"
-  fi
-fi
+  log "=== Backup completed successfully in $BACKUP_DURATION seconds ==="
+  print_backup_metrics
+}
 
-# === Update Backup Metrics ===
-last_backup_size=$(du -sh "$SNAPSHOT_DIR/$SNAP_NAME" | cut -f1)
-last_backup_time=$(date +'%Y-%m-%d %H:%M:%S')
-first_backup_time=$(grep -m 1 "First Backup:" "$LOG_FILE" | awk '{print $5}')
-
-current_timestamp=$(date +%s)
-
-if [[ -n "$first_backup_time" ]]; then
-  how_long=$(( (current_timestamp - first_backup_time) / 86400 ))
-else
-  how_long="unknown"
-  echo "First Backup: Date: $(date +'%Y-%m-%d'), Time: $(date +'%H:%M:%S')" >> "$LOG_FILE"
-fi
-
-echo "Last Backup: Date: $(date +'%Y-%m-%d'), Time: $(date +'%H:%M:%S'), Size: $last_backup_size" >> "$LOG_FILE"
-
-echo "[$(date +'%F %T')] === Backup completed successfully in $(($(date +%s)-$current_timestamp)) seconds ==="
-echo ""
-echo "=== Backup Metrics Summary ==="
-head -n 1 "$LOG_FILE"
-echo "Last Backup: Date: $(date +'%Y-%m-%d'), Time: $(date +'%H:%M:%S'), Size: $last_backup_size"
-echo "Core Backup: $(grep 'core' "$LOG_FILE" | tail -1)"
-echo "Total Backups Created: $(wc -l < "$LOG_FILE")"
-echo "Total Internal Snapshots: $(ls -1 $SNAPSHOT_DIR | wc -l)"
-echo "Total External Backups: $(ls -1 "$EXTERNAL_DEV/$EXTERNAL_BKP_DIR_NAME" 2>/dev/null | wc -l)"
-echo "How long with U: $how_long days"
+main "$@"

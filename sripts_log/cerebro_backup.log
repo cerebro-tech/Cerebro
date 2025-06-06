@@ -27,3 +27,41 @@ Total External Backups: 1
 How long with U: 0 days
 Backup Duration: 881 seconds
 
+Last Backup: Date: 2025-06-06, Time: 02:12:56, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 02:12:59, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 1
+How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 02:15:57, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 02:15:59, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 1
+How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 02:18:24, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 02:18:26, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 1
+How long with U: 1 days
+Last Backup: Date: 2025-06-06, Time: 02:22:48, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 02:22:50, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 1
+How long with U: 1 days
+[2025-06-06 02:26:03] Starting backup script...
+[2025-06-06 02:26:03] Running in NORMAL mode: snap_2025-06-06
+[2025-06-06 02:26:03] Removing existing snapshot: snap_2025-06-06 at /.snapshots
+[2025-06-06 02:26:03] Creating new read-only Btrfs snapshot: snap_2025-06-06
+[2025-06-06 02:26:03] Snapshot snap_2025-06-06 created in /.snapshots
+[2025-06-06 02:26:03] Found external device: /run/media/j/Flash_8GB
+[2025-06-06 02:26:04] Ho-Ho-ho-hooooo FU )) U havent space.. but u should know magic word motfacr))))
+[2025-06-06 02:26:07] === Backup completed successfully in 4 seconds ===
+Last Backup: Date: 2025-06-06, Time: 02:26:55, Size: 20G
+Core Backup: Date: 2025-06-06, Time: 02:26:57, Size: 6.4G
+Total Backups Created: 3
+Total Internal Snapshots: 3
+Total External Backups: 1
+How long with U: 1 days
