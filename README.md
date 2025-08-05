@@ -1,6 +1,6 @@
-# My Personal Scripts
+# Arch Linux Scripts
 
-This directory contains my personal scripts for system maintenance and daily tasks.
+This directory contains scripts for system maintenance and daily tasks.
 
 ## Scripts
 
