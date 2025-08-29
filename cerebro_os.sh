@@ -1,112 +1,141 @@
 #!/usr/bin/env bash
-# Cerebro Arch Linux Auto-Installer (EFISTUB only, performance-tuned)
-# Stack: Arch Linux + Zen kernel + EFISTUB + Ly + GNOME minimal
-
 set -euo pipefail
 
-### --- CONFIG --- ###
+### CONFIG ###
 HOSTNAME="cerebro"
 USERNAME="j"
-PASSWORD="777"
-
-DISK=$(lsblk -d -o NAME,SIZE,TYPE | grep disk)
-echo "Available disks:"
-lsblk -d -o NAME,SIZE,MODEL
-read -rp "Enter target disk (example: nvme0n1 or sda): " DISK
+USERPASS="777"
+ROOTPASS="777"
 
 BOOT_SIZE="1981M"
-ROOT_SIZE="44G"
-HOME_SIZE="64G"
+ROOT_SIZE="22G"
 SWAP_SIZE="28G"
-DATA_FS="xfs"   # XFS for performance
+HOME_SIZE="32G"
 
-### --- PARTITIONING --- ###
-sgdisk --zap-all "/dev/$DISK"
+### CHECK FOR DIALOG ###
+if ! command -v dialog &>/dev/null; then
+    echo "[*] Installing dialog for interactive menus..."
+    pacman -Sy --noconfirm dialog
+fi
 
-# EFI
-sgdisk -n 1:0:+${BOOT_SIZE} -t 1:ef00 -c 1:"EFI" "/dev/$DISK"
-# Root
-sgdisk -n 2:0:+${ROOT_SIZE} -t 2:8300 -c 2:"ROOT" "/dev/$DISK"
-# Home
-sgdisk -n 3:0:+${HOME_SIZE} -t 3:8300 -c 3:"HOME" "/dev/$DISK"
-# Swap
-sgdisk -n 4:0:+${SWAP_SIZE} -t 4:8200 -c 4:"SWAP" "/dev/$DISK"
-# Data (remaining)
-sgdisk -n 5:0:0 -t 5:8300 -c 5:"DATA" "/dev/$DISK"
+### SELECT DISK ###
+DISK=$(dialog --title "Select Target Disk" --menu "Available disks:" 15 60 4 \
+    $(lsblk -d -n -o NAME,SIZE | awk '{print $1 " " $2}') 3>&1 1>&2 2>&3)
+DISK="/dev/$DISK"
 
-partprobe "/dev/$DISK"
+### SELECT /DATA SIZE ###
+DATA_SIZE=$(dialog --inputbox "Enter /data size in GB:\n0 = no /data\nmax = use remaining space" 10 50 "0" 3>&1 1>&2 2>&3)
 
-### --- FORMATTING --- ###
-mkfs.vfat -F32 "/dev/${DISK}1"
-mkfs.xfs -f "/dev/${DISK}2"
-mkfs.xfs -f "/dev/${DISK}3"
-mkswap "/dev/${DISK}4"
-mkfs.${DATA_FS} -f "/dev/${DISK}5"
+clear
+echo "[*] Using disk: $DISK"
+echo "[*] /data size: $DATA_SIZE"
 
-### --- MOUNTING --- ###
-mount "/dev/${DISK}2" /mnt
-mkdir /mnt/{boot,home,data}
-mount "/dev/${DISK}1" /mnt/boot
-mount "/dev/${DISK}3" /mnt/home
-mount "/dev/${DISK}5" /mnt/data
-swapon "/dev/${DISK}4"
+### WIPE & CREATE PARTITIONS ###
+echo "[*] Wiping $DISK..."
+sgdisk --zap-all "$DISK"
 
-### --- INSTALL BASE SYSTEM --- ###
-pacstrap -K /mnt base linux-zen linux-firmware efibootmgr xfsprogs nano sudo networkmanager
+sgdisk -n 1:0:+${BOOT_SIZE} -t 1:ef00 -c 1:"EFI" $DISK
+sgdisk -n 2:0:+${ROOT_SIZE} -t 2:8300 -c 2:"ROOT" $DISK
+sgdisk -n 3:0:+${SWAP_SIZE} -t 3:8200 -c 3:"SWAP" $DISK
+sgdisk -n 4:0:+${HOME_SIZE} -t 4:8300 -c 4:"HOME" $DISK
 
-### --- FSTAB --- ###
+# DATA (conditional)
+if [[ "$DATA_SIZE" != "0" ]]; then
+    if [[ "$DATA_SIZE" == "max" ]]; then
+        sgdisk -n 5:0:0 -t 5:8300 -c 5:"DATA" $DISK
+    else
+        sgdisk -n 5:0:+${DATA_SIZE}G -t 5:8300 -c 5:"DATA" $DISK
+    fi
+fi
+
+partprobe "$DISK"
+sleep 2
+
+### FORMAT FILESYSTEMS ###
+echo "[*] Formatting filesystems..."
+mkfs.fat -F32 ${DISK}1
+mkfs.ext4 -f ${DISK}2
+mkswap ${DISK}3
+mkfs.ext4 -f ${DISK}4
+if [[ "$DATA_SIZE" != "0" ]]; then
+    mkfs.xfs -f -m crc=1,finobt=1 -n ftype=1 ${DISK}5
+fi
+
+### MOUNT FILESYSTEMS ###
+echo "[*] Mounting filesystems..."
+mount ${DISK}2 /mnt
+mkdir /mnt/{boot,home}
+mount ${DISK}1 /mnt/boot
+mount ${DISK}4 /mnt/home
+swapon ${DISK}3
+if [[ "$DATA_SIZE" != "0" ]]; then
+    mkdir /mnt/data
+    mount ${DISK}5 /mnt/data
+fi
+
+### BASE SYSTEM INSTALL ###
+echo "[*] Installing base system..."
+pacstrap /mnt base linux-zen linux-firmware intel-ucode \
+    xfsprogs efibootmgr vim sudo networkmanager
+
 genfstab -U /mnt >> /mnt/etc/fstab
 
-### --- CHROOT --- ###
+### CHROOT ###
 arch-chroot /mnt /bin/bash <<EOF
 set -euo pipefail
 
-ln -sf /usr/share/zoneinfo/Europe/Kyiv /etc/localtime
-hwclock --systohc
-echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
-locale-gen
-echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo "[*] Setting hostname..."
 echo "$HOSTNAME" > /etc/hostname
 
-# Hosts
-cat > /etc/hosts <<HST
+echo "[*] Setting hosts..."
+cat <<HST > /etc/hosts
 127.0.0.1   localhost
 ::1         localhost
 127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
 HST
 
-# Users
-echo "root:$PASSWORD" | chpasswd
+echo "[*] Setting timezone..."
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+hwclock --systohc
+
+echo "[*] Locale..."
+sed -i 's/#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+echo "[*] Setting root password..."
+echo "root:$ROOTPASS" | chpasswd
+
+echo "[*] Creating user..."
 useradd -m -G wheel -s /bin/bash $USERNAME
-echo "$USERNAME:$PASSWORD" | chpasswd
-echo "%wheel ALL=(ALL) ALL" > /etc/sudoers.d/99_wheel
+echo "$USERNAME:$USERPASS" | chpasswd
+sed -i 's/# %wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/' /etc/sudoers
 
-# Initramfs
-mkinitcpio -P
-
-# Get UUIDs
-ROOT_UUID=\$(blkid -s UUID -o value /dev/${DISK}2)
-SWAP_UUID=\$(blkid -s UUID -o value /dev/${DISK}4)
-
-# EFISTUB ENTRY
-efibootmgr -c -d /dev/$DISK -p 1 \
-  -L "Arch Linux Zen (Cerebro EFISTUB)" \
-  -l '\vmlinuz-linux-zen' \
-  -u "initrd=\intel-ucode.img initrd=\initramfs-linux-zen.img root=UUID=\$ROOT_UUID rw quiet loglevel=3 mitigations=off intel_pstate=active resume=UUID=\$SWAP_UUID"
-
-# Enable services
 systemctl enable NetworkManager
 
-# Install minimal GNOME + Ly
-pacman --noconfirm -S gnome-shell gnome-control-center gnome-terminal \
-  gnome-keyring nautilus sushi eog gvfs gvfs-mtp gvfs-smb gvfs-nfs gvfs-afc \
-  xdg-user-dirs xdg-utils ly pipewire pipewire-alsa pipewire-pulse pipewire-jack
+### GNOME MINIMAL ###
+echo "[*] Installing GNOME minimal..."
+pacman -S --needed --noconfirm gnome-control-center gnome-shell gnome-session \
+    gnome-terminal nautilus gnome-text-editor eog evince file-roller \
+    gnome-system-monitor gnome-calculator seahorse sushi gvfs gvfs-mtp
 
-# Remove unwanted GNOME packages
-pacman -Rsn --noconfirm yelp gnome-tour gnome-user-docs totem malcontent \
-  gnome-weather gnome-music gnome-maps gdm epiphany
+### Remove unwanted GNOME apps ###
+pacman -R --noconfirm yelp gnome-tour gnome-user-docs totem malcontent \
+    gnome-weather gnome-music gnome-maps gdm epiphany
 
+### Install Ly Display Manager ###
+pacman -S --needed --noconfirm ly
 systemctl enable ly.service
+
+### EFISTUB BOOT ENTRY ###
+echo "[*] Configuring EFISTUB boot..."
+ROOT_UUID=\$(blkid -s UUID -o value ${DISK}2)
+SWAP_UUID=\$(blkid -s UUID -o value ${DISK}3)
+
+efibootmgr -c -d $DISK -p 1 \
+  -L "Arch Linux (Zen, EFISTUB)" \
+  -l '\vmlinuz-linux-zen' \
+  -u "initrd=\intel-ucode.img initrd=\initramfs-linux-zen.img root=UUID=\$ROOT_UUID rw quiet resume=UUID=\$SWAP_UUID"
 EOF
 
-echo "✅ Installation complete. Reboot now."
+echo "[*] Installation finished. You can reboot now."
