@@ -23,38 +23,42 @@ echo "[Step 1] CPU Vendor: ${CPU_VENDOR:-Unknown}, GPU Vendor: ${GPU_VENDOR:-Non
 echo "[Step 1] Microcode package: ${MICROCODE_PKG:-None}"
 
 # -----------------------------
-# Step 2: Detect disks ≥ 32 GiB
+# Step 2: Detect disk and choose
 # -----------------------------
-echo "[Step 2] Detecting disks ≥32 GiB..."
-MIN_SIZE=$((32 * 1024 * 1024 * 1024))
+echo "[Step 2] Detecting available disks..."
 
-mapfile -t DISKS < <(lsblk -dnb -o NAME,SIZE,TYPE \
-  | awk -v min="$MIN_SIZE" '$3=="disk" && $2>=min {print "/dev/"$1}')
-
-if [ ${#DISKS[@]} -eq 0 ]; then
-  echo "No suitable disks found. Exiting."
-  exit 1
-elif [ ${#DISKS[@]} -eq 1 ]; then
-  DISK="${DISKS[0]}"
-  echo "Auto-selected disk: $DISK"
-else
-  echo "Available disks:"
-  for i in "${!DISKS[@]}"; do
-    echo "[$((i+1))] ${DISKS[$i]}"
-  done
-  while true; do
-    read -rp "Choose disk number: " idx
-    if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx>=1 && idx<=${#DISKS[@]} )); then
-      DISK="${DISKS[$((idx-1))]}"
-      break
+# List disks with size >= 32GB, not mounted
+AVAILABLE_DISKS=()
+while IFS= read -r line; do
+    DEV=$(echo "$line" | awk '{print $1}')
+    SIZE=$(echo "$line" | awk '{print $2}')
+    # Convert size to GB for comparison
+    SIZE_GB=$(echo "$SIZE" | sed -E 's/G//; s/T/1024/')
+    if (( SIZE_GB >= 32 )); then
+        # check if mounted
+        if ! mount | grep -q "^$DEV"; then
+            AVAILABLE_DISKS+=("$DEV")
+        fi
     fi
-    echo "Invalid choice."
-  done
+done < <(lsblk -d -o NAME,SIZE -n | awk '{print "/dev/"$1, $2}')
+
+if [ "${#AVAILABLE_DISKS[@]}" -eq 0 ]; then
+    echo "No disk >=32GB found. Exiting."
+    exit 1
+elif [ "${#AVAILABLE_DISKS[@]}" -eq 1 ]; then
+    DISK="${AVAILABLE_DISKS[0]}"
+    echo "Only one disk found, selected: $DISK"
+else
+    echo "Available disks:"
+    for i in "${!AVAILABLE_DISKS[@]}"; do
+        echo "[$i] ${AVAILABLE_DISKS[$i]}"
+    done
+    read -rp "Choose disk [0-${#AVAILABLE_DISKS[@]}]: " DISKIDX
+    DISK="${AVAILABLE_DISKS[$DISKIDX]}"
 fi
 
-echo "Selected disk: $DISK"
-read -rp "WARNING: This will erase $DISK. Type YES to proceed: " confirm
-[[ "$confirm" == "YES" ]] || exit 1
+echo "Using disk: $DISK"
+
 
 # -----------------------------
 # Step 3: Wipe disk
@@ -195,11 +199,20 @@ PACLIST=(
   pipewire pipewire-alsa pipewire-pulse
   pipewire-jack wireplumber ly pigz mold ninja git
 )
-pacstrap -K /mnt "${PACLIST[@]}"+(
-  ${GPU_VENDOR=="nvidia" && echo "nvidia nvidia-utils"} 
-  ${GPU_VENDOR=="amd"    && echo "xf86-video-amdgpu mesa"} 
-  ${GPU_VENDOR=="intel"  && echo "mesa"}
-)
+
+# Handle GPU packages safely
+GPU_PKGS=()
+if [ "$GPU_VENDOR" == "nvidia" ]; then
+    GPU_PKGS=(nvidia nvidia-utils)
+elif [ "$GPU_VENDOR" == "amd" ]; then
+    GPU_PKGS=(xf86-video-amdgpu mesa)
+elif [ "$GPU_VENDOR" == "intel" ]; then
+    GPU_PKGS=(mesa)
+fi
+
+# Install all packages
+pacstrap -K /mnt "${PACLIST[@]}" "${GPU_PKGS[@]}"
+
 
 # -----------------------------
 # Step 9: fstab
