@@ -242,7 +242,7 @@ fi
 echo "🚀 Setting up build environment..."
 
 # Initialize compilation flags safely to prevent unbound variable errors
-: "${CFLAGS:=-O2 -march=native}"
+: "${CFLAGS:=-O3 -march=native}"
 : "${LDFLAGS:=}"
 
 # Export variables for build processes
