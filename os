@@ -23,42 +23,28 @@ echo "[Step 1] CPU Vendor: ${CPU_VENDOR:-Unknown}, GPU Vendor: ${GPU_VENDOR:-Non
 echo "[Step 1] Microcode package: ${MICROCODE_PKG:-None}"
 
 # -----------------------------
-# Step 2: Detect disk and choose
+# Step 2: Select installation disk
 # -----------------------------
 echo "[Step 2] Detecting available disks..."
 
-# List disks with size >= 32GB, not mounted
-AVAILABLE_DISKS=()
-while IFS= read -r line; do
-    DEV=$(echo "$line" | awk '{print $1}')
-    SIZE=$(echo "$line" | awk '{print $2}')
-    # Convert size to GB for comparison
-    SIZE_GB=$(echo "$SIZE" | sed -E 's/G//; s/T/1024/')
-    if (( SIZE_GB >= 32 )); then
-        # check if mounted
-        if ! mount | grep -q "^$DEV"; then
-            AVAILABLE_DISKS+=("$DEV")
-        fi
-    fi
-done < <(lsblk -d -o NAME,SIZE -n | awk '{print "/dev/"$1, $2}')
+# List all disks >= 32GB that are not mounted
+AVAILABLE_DISKS=($(lsblk -dn -o NAME,SIZE,TYPE,MOUNTPOINT | \
+    awk '$3=="disk" && $2+0>=32 && $4=="" {print "/dev/" $1}'))
 
-if [ "${#AVAILABLE_DISKS[@]}" -eq 0 ]; then
-    echo "No disk >=32GB found. Exiting."
+if [ ${#AVAILABLE_DISKS[@]} -eq 0 ]; then
+    echo "Error: No disk >=32GB found."
     exit 1
-elif [ "${#AVAILABLE_DISKS[@]}" -eq 1 ]; then
+elif [ ${#AVAILABLE_DISKS[@]} -eq 1 ]; then
     DISK="${AVAILABLE_DISKS[0]}"
-    echo "Only one disk found, selected: $DISK"
+    echo "Only one disk found, using $DISK"
 else
     echo "Available disks:"
     for i in "${!AVAILABLE_DISKS[@]}"; do
         echo "[$i] ${AVAILABLE_DISKS[$i]}"
     done
-    read -rp "Choose disk [0-${#AVAILABLE_DISKS[@]}]: " DISKIDX
-    DISK="${AVAILABLE_DISKS[$DISKIDX]}"
+    read -rp "Select disk [0-${#AVAILABLE_DISKS[@]}]: " DISK_IDX
+    DISK="${AVAILABLE_DISKS[$DISK_IDX]}"
 fi
-
-echo "Using disk: $DISK"
-
 
 # -----------------------------
 # Step 3: Wipe disk
