@@ -242,7 +242,7 @@ fi
 echo "🚀 Setting up build environment..."
 
 # Initialize compilation flags safely to prevent unbound variable errors
-: "${CFLAGS:=-O3 -march=native}"
+: "${CFLAGS:=-O2 -march=native}"
 : "${LDFLAGS:=}"
 
 # Export variables for build processes
@@ -259,22 +259,24 @@ echo "🛠 LDFLAGS: $LDFLAGS"
 echo "🔧 Installing build tools if missing..."
 pacman -Sy --needed --noconfirm base-devel
 
-# Prepare source directories
-SRC_DIR="/mnt/arch_build/src"
-BUILD_DIR="/mnt/arch_build/build"
+# Prepare source and build directories on a large partition (/data)
+SRC_DIR="/data/arch_build/src"
+BUILD_DIR="/data/arch_build/build"
 mkdir -p "$SRC_DIR" "$BUILD_DIR"
 cd "$SRC_DIR" || { echo "❌ Failed to enter $SRC_DIR"; exit 1; }
 
+# Clean old build artifacts to free space
+echo "🧹 Cleaning old build files..."
+rm -rf "$BUILD_DIR"/*
+cd "$BUILD_DIR" || { echo "❌ Failed to enter $BUILD_DIR"; exit 1; }
+
 # Example: unpack source tarballs (existing logic unchanged)
-for tarball in *.tar.*; do
+for tarball in "$SRC_DIR"/*.tar.*; do
     echo "📦 Extracting $tarball..."
     tar xf "$tarball" -C "$BUILD_DIR"
 done
 
-# Move into build directory
-cd "$BUILD_DIR" || { echo "❌ Failed to enter $BUILD_DIR"; exit 1; }
-
-# Start compilation (existing logic preserved)
+# Start compilation
 echo "🔨 Starting compilation..."
 make -j"$NUM_CORES"
 
@@ -308,6 +310,7 @@ locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
 echo "✅ Timezone and locale configured."
+
 
 
 # -----------------------------
