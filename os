@@ -317,19 +317,31 @@ fi
 sed -i '/#\\[multilib\\]/,/Include/ s/^#//' /etc/pacman.conf || true
 pacman -Sy --noconfirm
 
-# --- Step 10.9 Chaotic-AUR (for preload) - install keyring and mirrorlist then repo ---
-cd /tmp
-curl -s -O https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst
-curl -s -O https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst
-pacman -U --noconfirm chaotic-keyring.pkg.tar.zst chaotic-mirrorlist.pkg.tar.zst || true
-# append repo include (if not present)
-if ! grep -q 'chaotic-aur' /etc/pacman.conf 2>/dev/null; then
-  cat >> /etc/pacman.conf <<CHAOTIC
+# ------------------------------------
+# Step 10.9: Enable Chaotic-AUR Repository
+# ------------------------------------
+echo "==> Enabling Chaotic-AUR repository..."
+
+# Import Chaotic-AUR key
+pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+pacman-key --lsign-key 3056513887B78AEB
+
+# Install keyring + mirrorlist from official CDN
+pacman -U --noconfirm \
+  'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst' \
+  'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'
+
+# Confirm repo is enabled in pacman.conf
+if ! grep -q "^\[chaotic-aur\]" /etc/pacman.conf; then
+  cat >> /etc/pacman.conf <<'EOF'
+
 [chaotic-aur]
 Include = /etc/pacman.d/chaotic-mirrorlist
-CHAOTIC
+EOF
 fi
-pacman -Sy --noconfirm
+
+echo "==> ✅ Chaotic-AUR has been enabled."
+
 
 # --- Step 10.10 install paru (AUR helper) from AUR ---
 pacman -S --noconfirm --needed git base-devel
