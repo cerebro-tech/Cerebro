@@ -237,13 +237,12 @@ else
     echo "[Step 10] ZRAM disabled by user."
 fi
 
-
 # --- Step 11: Build environment & system configuration ---
 
 echo "🚀 Setting up build environment..."
 
 # Initialize compilation flags safely to prevent unbound variable errors
-: "${CFLAGS:=-O3 -march=native}"
+: "${CFLAGS:=-O2 -march=native}"
 : "${LDFLAGS:=}"
 
 # Export variables for build processes
@@ -255,6 +254,10 @@ NUM_CORES=$(nproc)
 echo "💻 Using $NUM_CORES cores for compilation"
 echo "🛠 CFLAGS: $CFLAGS"
 echo "🛠 LDFLAGS: $LDFLAGS"
+
+# Ensure required build tools are installed
+echo "🔧 Installing build tools if missing..."
+pacman -Sy --needed --noconfirm base-devel
 
 # Prepare source directories
 SRC_DIR="/mnt/arch_build/src"
