@@ -54,9 +54,9 @@ sleep 2
 ### FORMAT FILESYSTEMS ###
 echo "[*] Formatting filesystems..."
 mkfs.fat -F32 ${DISK}1
-mkfs.ext4 -f ${DISK}2
+mkfs.ext4 -F ${DISK}2
 mkswap ${DISK}3
-mkfs.ext4 -f ${DISK}4
+mkfs.ext4 -F ${DISK}4
 if [[ "$DATA_SIZE" != "0" ]]; then
     mkfs.xfs -f -m crc=1,finobt=1 -n ftype=1 ${DISK}5
 fi
