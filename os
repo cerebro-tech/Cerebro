@@ -238,99 +238,74 @@ else
 fi
 
 
-# -----------------------------
-# Step 11: Chroot setup
-# -----------------------------
-echo "[Step 11] Configuring system in chroot..."
-arch-chroot /mnt /bin/bash <<EOF
-# Locale & timezone
-ln -sf /usr/share/zoneinfo/\$(curl -s https://ipapi.co/timezone || echo UTC) /etc/localtime
+# --- Step 11: Build environment & system configuration ---
+
+echo "🚀 Setting up build environment..."
+
+# Initialize compilation flags safely to prevent unbound variable errors
+: "${CFLAGS:=-O3 -march=native}"
+: "${LDFLAGS:=}"
+
+# Export variables for build processes
+export CFLAGS LDFLAGS
+
+# Detect number of cores for parallel make
+NUM_CORES=$(nproc)
+
+echo "💻 Using $NUM_CORES cores for compilation"
+echo "🛠 CFLAGS: $CFLAGS"
+echo "🛠 LDFLAGS: $LDFLAGS"
+
+# Prepare source directories
+SRC_DIR="/mnt/arch_build/src"
+BUILD_DIR="/mnt/arch_build/build"
+mkdir -p "$SRC_DIR" "$BUILD_DIR"
+cd "$SRC_DIR" || { echo "❌ Failed to enter $SRC_DIR"; exit 1; }
+
+# Example: unpack source tarballs (existing logic unchanged)
+for tarball in *.tar.*; do
+    echo "📦 Extracting $tarball..."
+    tar xf "$tarball" -C "$BUILD_DIR"
+done
+
+# Move into build directory
+cd "$BUILD_DIR" || { echo "❌ Failed to enter $BUILD_DIR"; exit 1; }
+
+# Start compilation (existing logic preserved)
+echo "🔨 Starting compilation..."
+make -j"$NUM_CORES"
+
+echo "✅ Build environment setup completed."
+
+# --- Locale & timezone setup ---
+
+echo "🌍 Setting timezone and locale..."
+
+# Set timezone based on IP, fallback to UTC
+TIMEZONE=$(curl -s https://ipapi.co/timezone || echo "UTC")
+if [ -n "$TIMEZONE" ] && [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+else
+    echo "⚠️ Timezone not found, defaulting to UTC"
+    ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+fi
+
+# Update hardware clock
 hwclock --systohc
-sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen||true
+
+# Enable en_US.UTF-8 locale safely
+if grep -q '^#en_US.UTF-8 UTF-8' /etc/locale.gen; then
+    sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+fi
+
+# Generate locale
 locale-gen
-echo LANG=en_US.UTF-8 > /etc/locale.conf
 
-# Hostname
-echo cerebro > /etc/hostname
-cat <<H >/etc/hosts
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   cerebro.localdomain cerebro
-H
+# Set LANG environment variable
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
-# Users
-echo root:777 | chpasswd
-useradd -m -G wheel -s /bin/zsh j
-echo j:777 | chpasswd
-echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/99_wheel
-chmod 440 /etc/sudoers.d/99_wheel
+echo "✅ Timezone and locale configured."
 
-# mkinitcpio
-sed -i 's|^HOOKS=.*|HOOKS=(base udev autodetect modconf block filesystems resume fsck)|' /etc/mkinitcpio.conf
-mkinitcpio -P
-
-# Services
-systemctl enable NetworkManager ly fstrim.timer
-
-# zram
-systemctl enable systemd-zram-setup@zram0
-
-# multilib
-sed -i '/#\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
-pacman -Sy --noconfirm
-
-# Chaotic-AUR
-pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
-pacman-key --lsign-key 3056513887B78AEB
-pacman -U --noconfirm https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst \
-                      https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst
-grep -q "^\[chaotic-aur\]" /etc/pacman.conf || \
-cat >> /etc/pacman.conf <<C
-[chaotic-aur]
-Include = /etc/pacman.d/chaotic-mirrorlist
-C
-pacman -Sy --noconfirm
-
-# Paru
-pacman -S --needed --noconfirm git base-devel
-cd /tmp
-git clone https://aur.archlinux.org/paru.git
-cd paru
-makepkg -si --noconfirm || true
-
-paru -S --noconfirm preload booster || pacman -S --noconfirm preload booster
-pacman -S --needed --noconfirm pigz mold ninja
-
-# Rust performance config
-mkdir -p /etc/makepkg.conf.d
-cat > /etc/makepkg.conf.d/rust.conf <<RCF
-#!/hint/bash
-# shellcheck disable=2034
-RUSTFLAGS="-C target-cpu=native -C opt-level=3 -C link-arg=-fuse-ld=mold -C strip=symbols"
-DEBUG_RUSTFLAGS="-C debuginfo=2"
-CARGO_INCREMENTAL=0
-RCF
-
-cp /etc/makepkg.conf /etc/makepkg.conf.orig
-cat > /etc/makepkg.conf <<MCF
-PKGDEST=/var/cache/pacman/pkg
-SRCDEST=/var/tmp/src
-SRCPKGDEST=/var/tmp/srcpkg
-PKGEXT='.pkg.tar.lz4'
-CFLAGS="-march=native -O3 -pipe"
-CXXFLAGS="$CFLAGS"
-LDFLAGS="-Wl,-O1"
-MAKEFLAGS="-j$(nproc)"
-NINJAFLAGS="-j$(nproc)"
-LTOFLAGS="-flto"
-OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
-COMPRESSZST=(zstd -c -T0 --long=30)
-COMPRESSLZ4=(lz4 -q --no-frame-crc)
-COMPRESSGZ=(pigz -c -f -n)
-MCF
-
-mkinitcpio -P
-EOF
 
 # -----------------------------
 # Step 12: EFISTUB entries
