@@ -33,36 +33,33 @@ echo "[STEP 1] CPU vendor: ${CPU_VENDOR:-unknown}, GPU vendor: ${GPU_VENDOR:-unk
 echo "[STEP 1] microcode package chosen: ${MICROCODE_PKG:-none}"
 
 # -----------------------------
-# Step 2: disk detection (>=32 GiB)
+# Step 2: Select installation disk
 # -----------------------------
-echo "[STEP 2] detecting disks >= 32 GiB..."
-mapfile -t CANDIDATE_DISKS < <(lsblk -dno NAME,SIZE | awk '$2+0 >= 34359738368 {print "/dev/"$1}')
-if [[ ${#CANDIDATE_DISKS[@]} -eq 0 ]]; then
-  echo "No disks >=32GB found. Exiting." >&2
-  exit 1
+
+echo "Step 2: Select installation disk"
+
+# Minimum size in bytes (32GB)
+MIN_SIZE=$((32 * 1024 * 1024 * 1024))
+
+# List available disks >=32GB
+DISKS=$(lsblk -dnb -o NAME,SIZE,TYPE | awk -v min="$MIN_SIZE" '$3=="disk" && $2 >= min {print $1}')
+
+if [ -z "$DISKS" ]; then
+    echo "❌ No disk >=32GB found."
+    exit 1
 fi
 
-if [[ ${#CANDIDATE_DISKS[@]} -eq 1 ]]; then
-  DISK="${CANDIDATE_DISKS[0]}"
-  echo "[STEP 2] single disk found; auto-selected: $DISK"
+# If only one disk, select automatically
+if [ $(echo "$DISKS" | wc -l) -eq 1 ]; then
+    DISK="/dev/$(echo "$DISKS")"
+    echo "✅ Only one suitable disk found: $DISK (auto-selected)"
 else
-  echo "Available disks:"
-  for i in "${!CANDIDATE_DISKS[@]}"; do
-    printf "  [%d] %s\n" $((i+1)) "${CANDIDATE_DISKS[$i]}"
-  done
-  while true; do
-    read -rp "Choose disk number to install to: " disk_choice
-    if [[ "$disk_choice" =~ ^[0-9]+$ ]] && (( disk_choice >= 1 && disk_choice <= ${#CANDIDATE_DISKS[@]} )); then
-      DISK="${CANDIDATE_DISKS[$((disk_choice-1))]}"
-      break
-    fi
-    echo "Invalid choice."
-  done
+    echo "Available disks:"
+    lsblk -d -o NAME,SIZE,MODEL | grep -F "$(echo $DISKS | tr '\n' ' ')"
+    echo
+    read -p "Enter disk to install on (e.g., sda, nvme0n1): " DISK_CHOICE
+    DISK="/dev/$DISK_CHOICE"
 fi
-
-echo "[STEP 2] target disk: $DISK"
-read -rp "This will erase $DISK — type YES to continue: " confirm
-[[ "$confirm" == "YES" ]] || { echo "Aborted by user."; exit 1; }
 
 # -----------------------------
 # Step 3: wipe disk signatures (fast)
