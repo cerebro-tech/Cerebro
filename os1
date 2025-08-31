@@ -1,0 +1,98 @@
+#!/bin/bash
+# Cerebro Arch Install Script (Fixed)
+# Purpose: Install Arch Linux with robust handling of RAM, ISO storage, and staged package installation.
+
+set -euo pipefail
+shopt -s inherit_errexit
+
+# -------------------------------
+# Step 1: Detect system resources
+# -------------------------------
+
+# Detect total RAM in MiB
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+echo "💾 Total RAM: ${MEM_MB} MiB"
+
+# Detect free space on root partition (ISO or USB target)
+ROOT_FREE_BLOCKS=$(df --output=avail / | tail -1)
+BLOCK_SIZE=$(stat -f -c "%S" /)
+ROOT_FREE_BYTES=$((ROOT_FREE_BLOCKS * BLOCK_SIZE))
+ROOT_FREE_GB=$(awk "BEGIN {printf \"%.2f\", ${ROOT_FREE_BYTES}/1024/1024/1024}")
+echo "📀 Free space on /: ${ROOT_FREE_GB} GB"
+
+# -------------------------------
+# Step 2: Configure ZRAM if RAM ≥ 8GB
+# -------------------------------
+
+if (( MEM_MB >= 8192 )); then
+    ZRAM_SIZE_MB=$(( MEM_MB / 2 ))
+    echo "⚡ Setting up ZRAM: ${ZRAM_SIZE_MB} MiB"
+    modprobe zram
+    echo $ZRAM_SIZE_MB > /sys/block/zram0/disksize
+    mkswap /dev/zram0
+    swapon /dev/zram0
+fi
+
+# -------------------------------
+# Step 3: Determine best build directory
+# -------------------------------
+
+# Prefer RAM (/tmp) if enough space, else fallback to root
+BUILD_DIR="/tmp/cerebro-build"
+mkdir -p "$BUILD_DIR"
+
+# Check if /tmp has enough space
+TMP_FREE_BYTES=$(df --output=avail /tmp | tail -1)
+TMP_FREE_GB=$(awk "BEGIN {printf \"%.2f\", ${TMP_FREE_BYTES}*${BLOCK_SIZE}/1024/1024/1024}")
+REQUIRED_BUILD_GB=1  # Example, adjust based on packages
+
+if (( $(echo "$TMP_FREE_GB >= $REQUIRED_BUILD_GB" | bc -l) )); then
+    echo "🛠 Using /tmp for building packages (fast RAM)"
+else
+    BUILD_DIR="/build"
+    mkdir -p "$BUILD_DIR"
+    echo "🛠 Using /build directory (disk fallback)"
+fi
+
+export BUILD_DIR
+
+# -------------------------------
+# Step 4: Locale & timezone
+# -------------------------------
+
+ln -sf /usr/share/zoneinfo/$(curl -s https://ipapi.co/timezone || echo UTC) /etc/localtime
+hwclock --systohc
+sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen || true
+locale-gen
+echo LANG=en_US.UTF-8 > /etc/locale.conf
+
+# -------------------------------
+# Step 5: Stage 1 - Base packages
+# -------------------------------
+
+: "${CFLAGS:=-O2 -march=native}"
+: "${LDFLAGS:=}"
+export CFLAGS LDFLAGS
+
+# Install base packages
+pacman -Sy --noconfirm base base-devel linux linux-firmware vim sudo
+
+# -------------------------------
+# Step 6: Stage 2 - Post-install packages (optional)
+# -------------------------------
+# This can run after reboot or in post-install script
+# Example: additional packages
+# pacman -Sy --noconfirm git zsh python python-pip docker ...
+
+# -------------------------------
+# Step 7: Cleanup
+# -------------------------------
+
+echo "✅ Base installation completed."
+echo "💡 Next: Run post-install script for additional packages."
+
+# Turn off ZRAM after build (optional)
+if (( MEM_MB >= 8192 )); then
+    swapoff /dev/zram0
+    rmmod zram
+fi
