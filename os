@@ -208,14 +208,35 @@ genfstab -U /mnt >> /mnt/etc/fstab
 # -----------------------------
 # Step 10: ZRAM config
 # -----------------------------
-MEM_MB=$(awk '/MemTotal/ {print $2/1024}' /proc/meminfo)
-ZRAM_MB=$(( MEM_MB/2 > 16384 ? 16384 : MEM_MB/2 ))
-echo "[Step 10] ZRAM size: ${ZRAM_MB} MiB"
-cat > /mnt/etc/systemd/zram-generator.conf <<EOF
+echo "[Step 10] Configuring ZRAM..."
+
+# Detect total RAM in MiB (integer only)
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+echo "Detected RAM: ${MEM_MB} MiB"
+
+# Ask user for ZRAM size in GB
+read -rp "Enter ZRAM size in GB (0 = disable, default = RAM/6): " ZRAM_GB
+
+# If user presses Enter, use default RAM/6
+ZRAM_GB=${ZRAM_GB:-$(( MEM_MB / 1024 / 6 ))}
+
+if [ "$ZRAM_GB" -gt 0 ]; then
+    ZRAM_MB=$(( ZRAM_GB * 1024 ))
+    echo "[Step 10] ZRAM size: ${ZRAM_MB} MiB"
+
+    # Create ZRAM generator config inside new system
+    mkdir -p /mnt/etc/systemd
+    cat > /mnt/etc/systemd/zram-generator.conf <<EOF
 [zram0]
 zram-size = ${ZRAM_MB}M
 compression-algorithm = lz4
 EOF
+
+    echo "[Step 10] ZRAM configuration done."
+else
+    echo "[Step 10] ZRAM disabled by user."
+fi
+
 
 # -----------------------------
 # Step 11: Chroot setup
