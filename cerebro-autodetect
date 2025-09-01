@@ -1,0 +1,99 @@
+#!/bin/bash
+# Auto-detect hardware and prepare kernel driver config (including GPU suggestions)
+
+set -e
+
+CONF_FILE="hw_drivers.conf"
+
+echo "💻 Detecting system brand and model..."
+SYS_BRAND=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo "Unknown")
+SYS_MODEL=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+SYS_CHASSIS=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo "Unknown")
+
+echo "💻 Detected system brand: $SYS_BRAND"
+echo "🖥 Model: $SYS_MODEL"
+echo "🧩 Chassis type: $SYS_CHASSIS"
+
+echo "🔍 Checking required packages..."
+PKGS=(lspci dmidecode lscpu usbutils smartmontools paru)
+for pkg in "${PKGS[@]}"; do
+    if ! command -v $pkg >/dev/null 2>&1; then
+        echo "[!] $pkg not found. Installing..."
+        sudo pacman -S --needed $pkg --noconfirm || echo "Please install $pkg manually"
+    else
+        echo "[✔] $pkg found."
+    fi
+done
+
+# Ensure USB scanning
+if ! command -v lsusb >/dev/null 2>&1; then
+    echo "[!] lsusb not found. Trying AUR alternative..."
+    if ! command -v viusb >/dev/null 2>&1; then
+        echo "[!] Installing 'viusb' from AUR..."
+        paru -S --needed viusb --noconfirm
+    fi
+    LSUSB_CMD="viusb"
+else
+    LSUSB_CMD="lsusb"
+fi
+
+echo "🔍 Scanning PCI devices..."
+PCI_DEVICES=$(lspci -mm)
+echo "$PCI_DEVICES"
+
+echo "🔍 Scanning USB devices..."
+USB_DEVICES=$($LSUSB_CMD 2>/dev/null || echo "USB scan not available")
+echo "$USB_DEVICES"
+
+echo "🔍 Detecting GPU..."
+GPU_INFO=$(lspci | grep -i -E "vga|3d|display")
+echo "$GPU_INFO"
+
+GPU_VENDOR="Unknown"
+if echo "$GPU_INFO" | grep -iq nvidia; then
+    GPU_VENDOR="NVIDIA"
+elif echo "$GPU_INFO" | grep -iq amd; then
+    GPU_VENDOR="AMD"
+elif echo "$GPU_INFO" | grep -iq intel; then
+    GPU_VENDOR="Intel"
+fi
+echo "Detected GPU vendor: $GPU_VENDOR"
+
+# Function to prompt user with default [Enter = Yes]
+prompt_driver() {
+    local msg="$1"
+    read -p "$msg [Press Enter = Yes / n = No / m = Manual]: " resp
+    case "$resp" in
+        ""|y|Y) echo "yes" ;;
+        n|N) echo "no" ;;
+        m|M) echo "manual" ;;
+        *) echo "yes" ;;
+    esac
+}
+
+echo
+echo "🛠 Choose which drivers to include:"
+DRV_STORAGE=$(prompt_driver "Include storage drivers?")
+DRV_NETWORK=$(prompt_driver "Include network driver?")
+DRV_AUDIO=$(prompt_driver "Include audio driver?")
+DRV_USB=$(prompt_driver "Include USB driver?")
+
+DRV_GPU=$(prompt_driver "Include $GPU_VENDOR GPU driver?")
+
+# Save selection to hw_drivers.conf
+cat > $CONF_FILE <<EOF
+# Auto-detected hardware drivers
+STORAGE_DRIVER=$DRV_STORAGE
+NETWORK_DRIVER=$DRV_NETWORK
+AUDIO_DRIVER=$DRV_AUDIO
+USB_DRIVER=$DRV_USB
+GPU_DRIVER=$DRV_GPU
+GPU_VENDOR=$GPU_VENDOR
+EOF
+
+echo
+echo "🎉 Hardware config saved to $CONF_FILE"
+echo "You can merge it into your kernel .config with:"
+echo "    scripts/kconfig/merge_config.sh .config $CONF_FILE"
+
+echo "✅ Done."
