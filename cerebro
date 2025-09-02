@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# cerebro_os.sh – Menu-driven Arch Linux installer with Cerebro stack
+# Features:
+#  - Hardware autodetect integration (cerebro-autodetect)
+#  - Menu-driven UI via whiptail (fallback to simple prompts)
+#  - Step-based functions with resume / step-by-step / run-all
+#  - Proxmox added to VM detection
+#  - /boot partition size (default 1981M), FAT32
+#  - Filesystem choices for other partitions: ext4, xfs, f2fs
+#  - Separate Swap/ZRAM step: none, zram, disk swap, both
+#  - Dry-run mode to simulate destructive steps
+
+# -----------------------------
+# Globals & defaults
+# -----------------------------
+DRY_RUN=false
+USE_WHIPTAIL=true
+DEBUG_MODE=false
+RESUME_STEP=1
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AUTODETECT_URL="https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/cerebro-autodetect"
+AUTODETECT_LOCAL="/tmp/cerebro-autodetect.sh"
+BOOT_DEFAULT_MB=1981
+MIN_DISK_GB=64
+STEPS=10
+
+# User choices (filled by steps)
+TARGET_DISK=""
+BOOT_MB=$BOOT_DEFAULT_MB
+ROOT_GB=44
+HOME_GB=20
+DATA_IN=0
+SWAP_GB=0
+ROOT_FS="ext4"
+HOME_FS="ext4"
+DATA_FS="ext4"
+DM_CHOICE="ly"
+BOOT_CHOICE="EFISTUB"
+ZRAM_MB=0
+ZRAM_COMP="lz4"
+SWAP_COMP="none"
+SWAP_MODE="none" # none|zram|disk|both
+
+# -----------------------------
+# Helpers
+# -----------------------------
+info(){ echo -e "[INFO] $*"; }
+warn(){ echo -e "[WARN] $*"; }
+err(){ echo -e "[ERROR] $*"; exit 1; }
+
+# safe run (no-op in dry run)
+srun(){ if $DRY_RUN; then echo "[DRY-RUN] $*"; else eval "$*"; fi }
+
+# whiptail wrapper with fallback
+whiptail_check(){
+  if ! command -v whiptail >/dev/null 2>&1; then
+    USE_WHIPTAIL=false
+    warn "whiptail not found — falling back to plain prompts"
+  fi
+}
+
+menu_yesno(){ local title="$1"; local txt="$2"; if $USE_WHIPTAIL; then whiptail --title "$title" --yesno "$txt" 10 60; return $?; else read -rp "$txt (y/N): " ans; [[ "$ans" =~ ^[yY] ]]; fi }
+menu_input(){ local title="$1"; local txt="$2"; local def="$3"; if $USE_WHIPTAIL; then whiptail --title "$title" --inputbox "$txt" 10 60 "$def" 3>&1 1>&2 2>&3; else read -rp "$txt [$def]: " v; echo "${v:-$def}"; fi }
+menu_menu(){ local title="$1"; local txt="$2"; shift 2; local opts=($@); if $USE_WHIPTAIL; then local choices=(); for ((i=0;i<${#opts[@]};i++)); do choices+=("$i" "${opts[i]}"); done; local pick; pick=$(whiptail --title "$title" --menu "$txt" 15 60 6 "${choices[@]}" 3>&1 1>&2 2>&3) || return 1; echo "${opts[$pick]}"; else echo "Options:"; local i=1; for opt in "${opts[@]}"; do echo " $i) $opt"; ((i++)); done; while true; do read -rp "$txt: " sel; [[ "$sel" =~ ^[0-9]+$ ]] || continue; ((sel>=1 && sel<=${#opts[@]})) || continue; echo "${opts[$((sel-1))]}"; break; done; fi }
+
+pause(){ if $USE_WHIPTAIL; then whiptail --title "Continue" --msgbox "Press OK to continue" 8 40; else read -rp "Press Enter to continue..." _; fi }
+
+# Step runner
+run_step(){ local n=$1; if (( RESUME_STEP <= n )); then info "-> Running step $n"; "step_$n"; if $DEBUG_MODE; then pause; fi; else info "-> Skipping step $n (resume from $RESUME_STEP)"; fi }
+
+# -----------------------------
+# Step functions
+# -----------------------------
+
+# Step 1: Hardware autodetect
+step_1(){
+  info "Step 1: Hardware autodetect"
+  if curl -fsSL "$AUTODETECT_URL" -o "$AUTODETECT_LOCAL"; then
+    chmod +x "$AUTODETECT_LOCAL"
+    if $DRY_RUN; then echo "[DRY-RUN] Would run autodetect script: $AUTODETECT_LOCAL"; else bash "$AUTODETECT_LOCAL" || warn "Autodetect returned non-zero"; fi
+  else
+    warn "Could not fetch cerebro-autodetect"
+  fi
+}
+
+# Step 2: Storage check & disk selection
+step_2(){
+    echo "[INFO] Step 2: Storage check and disk selection"
+    lsblk -d -o NAME,SIZE,MODEL
+
+    # If only one disk is available, auto-select
+    DISK_COUNT=$(lsblk -d -n -o NAME | wc -l)
+    if [ "$DISK_COUNT" -eq 1 ]; then
+        DISK=$(lsblk -d -n -o NAME | head -n1)
+        echo "[INFO] Only one disk detected: /dev/$DISK (auto-selected)"
+    else
+        read -rp "Enter target disk (e.g. nvme0n1): " DISK
+    fi
+
+    if [ -z "$DISK" ]; then
+        echo "[ERROR] No disk selected"
+        exit 1
+    fi
+
+    if [ ! -e "/sys/block/$DISK" ]; then
+        echo "[ERROR] /dev/$DISK is not a valid block device"
+        exit 1
+    fi
+
+    echo "[INFO] Selected disk: /dev/$DISK"
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] Would partition /dev/$DISK"
+    fi
+}
+
+
+# Step 3: VM detection (includes Proxmox)
+step_3(){
+    echo "[INFO] Step 3: VM detection"
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        echo "[DRY-RUN] Would detect VM type using systemd-detect-virt and dmidecode"
+    fi
+
+    # systemd-detect-virt returns "none" if physical
+    vm_type=$(systemd-detect-virt 2>/dev/null || echo "unknown")
+
+    # Fallback to lscpu if dmidecode not available or restricted
+    vendor="Unknown"
+    if command -v dmidecode >/dev/null 2>&1; then
+        vendor=$(dmidecode -s system-manufacturer 2>/dev/null || echo "Unknown")
+    elif command -v lscpu >/dev/null 2>&1; then
+        vendor=$(lscpu | grep "Vendor ID:" | awk '{print $3}' || echo "Unknown")
+    fi
+
+    if [[ "$vm_type" == "none" || "$vm_type" == "unknown" ]]; then
+        echo "[INFO] Environment: Physical machine ($vendor)"
+    else
+        case "$vm_type" in
+            kvm|qemu) vm_name="QEMU/KVM" ;;
+            vmware)   vm_name="VMware" ;;
+            oracle)   vm_name="VirtualBox" ;;
+            microsoft) vm_name="Hyper-V" ;;
+            parallels) vm_name="Parallels" ;;
+            proxmox)   vm_name="Proxmox" ;;  # explicitly added
+            *)         vm_name="$vm_type" ;;
+        esac
+        echo "[INFO] Environment: Virtualized ($vm_name) → Vendor: $vendor"
+        if [[ "$DRY_RUN" == "1" ]]; then
+            echo "[DRY-RUN] Would apply virtualization tweaks for $vm_name"
+        fi
+    fi
+}
+
+
+# Step 4: /boot partition size (FAT32 enforced)
+step_4(){
+  info "Step 4: /boot partition"
+  BOOT_MB=$(menu_input "/boot size" "Enter /boot size in MB" "$BOOT_DEFAULT_MB")
+  info "/boot will be ${BOOT_MB}MB (FAT32)"
+}
+
+# Step 5: Other partitions & filesystems
+step_5(){
+  info "Step 5: Root, /home, /data sizes and filesystems"
+  ROOT_GB=$(menu_input "root size" "Enter root (/) size in GB" "$ROOT_GB")
+  HOME_GB=$(menu_input "home size" "Enter /home size in GB" "$HOME_GB")
+  SWAP_GB=$(menu_input "swap size" "Enter swap size in GB (0 = none)" "$SWAP_GB")
+  DATA_IN=$(menu_input "data size" "Enter /data size in GB (0 = skip; max = remaining)" "$DATA_IN")
+
+  ROOT_FS=$(menu_menu "Root FS" "Choose filesystem for /" "ext4" "xfs" "f2fs")
+  HOME_FS=$(menu_menu "Home FS" "Choose filesystem for /home" "ext4" "xfs" "f2fs")
+  if [[ "$DATA_IN" != "0" ]]; then DATA_FS=$(menu_menu "Data FS" "Choose filesystem for /data" "ext4" "xfs" "f2fs"); fi
+  info "Filesystems: root=$ROOT_FS home=$HOME_FS data=${DATA_FS:-none}"
+}
+
+# Step 6: Bootloader installation prep (no destructive ops here)
+step_6(){
+  info "Step 6: Bootloader choice"
+  BOOT_CHOICE=$(menu_menu "Bootloader" "Choose bootloader to install" "EFISTUB" "rEFInd")
+  info "Bootloader: $BOOT_CHOICE"
+}
+
+# Step 7: Display manager
+step_7(){
+  info "Step 7: Display manager"
+  DM_CHOICE=$(menu_menu "Display Manager" "Choose display manager" "ly" "gdm")
+  info "Display manager: $DM_CHOICE"
+}
+
+# Step 8: Swap/ZRAM setup (separate step)
+step_8(){
+  info "Step 8: Swap/ZRAM configuration"
+  SWAP_MODE=$(menu_menu "Swap mode" "Choose swap mode" "none" "zram" "disk" "both")
+  case "$SWAP_MODE" in
+    none)
+      info "No swap will be configured";
+      ;;
+    zram)
+      ZRAM_MB=$(menu_input "ZRAM size" "Enter ZRAM size in MB (0 = default RAM/6)" "0")
+      ZRAM_COMP=$(menu_menu "ZRAM comp" "Choose zram compression" "lz4" "zstd")
+      info "ZRAM: ${ZRAM_MB:-default}MB comp=$ZRAM_COMP";
+      ;;
+    disk)
+      SWAP_GB=$(menu_input "Swap size" "Enter swap partition size in GB" "$SWAP_GB")
+      SWAP_COMP=$(menu_menu "Swap comp" "Choose swap compression (applies to zram only; disk swap compression is not standard)" "none" "lz4" "zstd")
+      info "Disk swap: ${SWAP_GB}GB";
+      ;;
+    both)
+      ZRAM_MB=$(menu_input "ZRAM size" "Enter ZRAM size in MB (0 = default RAM/6)" "0")
+      ZRAM_COMP=$(menu_menu "ZRAM comp" "Choose zram compression" "lz4" "zstd")
+      SWAP_GB=$(menu_input "Swap size" "Enter swap partition size in GB" "$SWAP_GB")
+      SWAP_COMP=$(menu_menu "Swap comp" "Choose swap compression (disk swap compression not standard)" "none" "lz4" "zstd")
+      info "Both configured: zram ${ZRAM_MB:-default}MB comp=$ZRAM_COMP ; disk swap ${SWAP_GB}GB"
+      ;;
+  esac
+}
+
+# Step 9: Base system installation (destructive)
+step_9(){
+  info "Step 9: Partitioning, formatting and pacstrap"
+  # Partitioning using sgdisk
+  info "Creating GPT and partitions on $TARGET_DISK"
+  if $DRY_RUN; then echo "[DRY-RUN] sgdisk --zap-all $TARGET_DISK"; else sgdisk --zap-all "$TARGET_DISK"; fi
+  # Create ESP
+  if $DRY_RUN; then echo "[DRY-RUN] Create ESP size ${BOOT_MB}M"; else sgdisk -n 1:0:+${BOOT_MB}M -t 1:ef00 -c 1:EFI "$TARGET_DISK"; fi
+  # Create root
+  if $DRY_RUN; then echo "[DRY-RUN] Create ROOT size ${ROOT_GB}G"; else sgdisk -n 2:0:+${ROOT_GB}G -t 2:8300 -c 2:ROOT "$TARGET_DISK"; fi
+  local idx=3
+  if [[ "$SWAP_MODE" == "disk" || "$SWAP_MODE" == "both" ]]; then
+    if $DRY_RUN; then echo "[DRY-RUN] Create SWAP size ${SWAP_GB}G"; else sgdisk -n $idx:0:+${SWAP_GB}G -t $idx:8200 -c $idx:SWAP "$TARGET_DISK"; fi
+    ((idx++))
+  fi
+  if $DRY_RUN; then echo "[DRY-RUN] Create HOME size ${HOME_GB}G"; else sgdisk -n $idx:0:+${HOME_GB}G -t $idx:8300 -c $idx:HOME "$TARGET_DISK"; fi
+  ((idx++))
+  if [[ "$DATA_IN" != "0" ]]; then
+    if [[ "$DATA_IN" == "max" ]]; then
+      # let sgdisk use remaining
+      if $DRY_RUN; then echo "[DRY-RUN] Create DATA using remaining space"; else sgdisk -n $idx:0:0 -t $idx:8300 -c $idx:DATA "$TARGET_DISK"; fi
+    else
+      if $DRY_RUN; then echo "[DRY-RUN] Create DATA size ${DATA_IN}G"; else sgdisk -n $idx:0:+${DATA_IN}G -t $idx:8300 -c $idx:DATA "$TARGET_DISK"; fi
+    fi
+  fi
+  # Wait for kernel
+  srun "partprobe $TARGET_DISK; sleep 2"
+
+  # Map partition names
+  if [[ $(basename "$TARGET_DISK") == nvme* ]]; then
+    ESP="${TARGET_DISK}p1"; ROOT_PART="${TARGET_DISK}p2"; HOME_PART="${TARGET_DISK}p$((idx-1))"; else
+    ESP="${TARGET_DISK}1"; ROOT_PART="${TARGET_DISK}2"; HOME_PART="${TARGET_DISK}4"; fi
+
+  info "Formatting partitions"
+  srun "mkfs.fat -F32 $ESP"
+  case "$ROOT_FS" in
+    ext4) srun "mkfs.ext4 -F $ROOT_PART";;
+    xfs) srun "mkfs.xfs -f $ROOT_PART";;
+    f2fs) srun "mkfs.f2fs -f $ROOT_PART";;
+  esac
+  case "$HOME_FS" in
+    ext4) srun "mkfs.ext4 -F $HOME_PART";;
+    xfs) srun "mkfs.xfs -f $HOME_PART";;
+    f2fs) srun "mkfs.f2fs -f $HOME_PART";;
+  esac
+  if [[ "$DATA_IN" != "0" ]]; then
+    if [[ $(basename "$TARGET_DISK") == nvme* ]]; then DATA_PART="${TARGET_DISK}p$idx"; else DATA_PART="${TARGET_DISK}5"; fi
+    case "$DATA_FS" in
+      ext4) srun "mkfs.ext4 -F $DATA_PART";;
+      xfs) srun "mkfs.xfs -f $DATA_PART";;
+      f2fs) srun "mkfs.f2fs -f $DATA_PART";;
+    esac
+  fi
+
+  if [[ "$SWAP_MODE" == "disk" || "$SWAP_MODE" == "both" ]]; then
+    # set up swap partition (mkswap)
+    if [[ $(basename "$TARGET_DISK") == nvme* ]]; then SWAP_PART="${TARGET_DISK}p3"; else SWAP_PART="${TARGET_DISK}3"; fi
+    srun "mkswap $SWAP_PART"
+  fi
+
+  # Mount
+  info "Mounting filesystems to /mnt"
+  srun "mount $ROOT_PART /mnt"
+  srun "mkdir -p /mnt/boot /mnt/home"
+  srun "mount $ESP /mnt/boot"
+  srun "mount $HOME_PART /mnt/home"
+  if [[ "$DATA_IN" != "0" ]]; then srun "mkdir -p /mnt/data; mount $DATA_PART /mnt/data"; fi
+  if [[ "$SWAP_MODE" == "disk" || "$SWAP_MODE" == "both" ]]; then srun "swapon $SWAP_PART"; fi
+
+  # Pacstrap
+  PKGS=(base base-devel linux linux-firmware networkmanager sudo zsh)
+  if [[ "$DM_CHOICE" == "ly" ]]; then PKGS+=(ly xorg-xinit); else PKGS+=(gdm gnome gnome-extra); fi
+  PKGS+=(e2fsprogs xfsprogs f2fs-tools efibootmgr refind)
+  info "Installing packages: ${PKGS[*]}"
+  if $DRY_RUN; then echo "[DRY-RUN] pacstrap -K /mnt ${PKGS[*]}"; else pacstrap -K /mnt "${PKGS[@]}"; fi
+
+  # fstab
+  srun "genfstab -U /mnt >> /mnt/etc/fstab"
+}
+
+# Step 10: Post-install (chroot) configuration
+step_10(){
+  info "Step 10: Post-install configuration (chroot)"
+  # create basic chroot script
+  cat > /tmp/cerebro-chroot.sh <<'EOF'
+set -euo pipefail
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+hwclock --systohc
+sed -i 's/#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen || true
+locale-gen
+echo 'LANG=en_US.UTF-8' > /etc/locale.conf
+echo cerebro > /etc/hostname
+cat > /etc/hosts <<H
+127.0.0.1 localhost
+::1 localhost
+127.0.1.1 cerebro.localdomain cerebro
+H
+useradd -m -G wheel -s /bin/zsh j || true
+# Note: password prompting will happen interactively if executed
+EOF
+  if $DRY_RUN; then echo "[DRY-RUN] arch-chroot /mnt /bin/bash /tmp/cerebro-chroot.sh"; else cp /tmp/cerebro-chroot.sh /mnt/tmp/; arch-chroot /mnt /bin/bash /tmp/cerebro-chroot.sh; fi
+
+  # Enable NetworkManager and DM
+  if $DRY_RUN; then echo "[DRY-RUN] systemctl enable NetworkManager"; else arch-chroot /mnt systemctl enable NetworkManager; fi
+  if [[ "$DM_CHOICE" == "ly" ]]; then srun "arch-chroot /mnt systemctl enable ly"; else srun "arch-chroot /mnt systemctl enable gdm"; fi
+
+  # mkinitcpio
+  srun "arch-chroot /mnt mkinitcpio -P"
+
+  # Bootloader
+  if [[ "$BOOT_CHOICE" == "EFISTUB" ]]; then
+    info "Creating EFISTUB entry"
+    if ! $DRY_RUN; then
+      ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART" || true)
+      efibootmgr -c -d "$TARGET_DISK" -p 1 -L "Arch Linux (Cerebro EFISTUB)" -l '\vmlinuz-linux' -u "initrd=\intel-ucode.img initrd=\initramfs-linux.img root=UUID=$ROOT_UUID rw quiet"
+    else
+      echo "[DRY-RUN] efibootmgr entry would be created"
+    fi
+  else
+    info "Installing rEFInd"
+    srun "arch-chroot /mnt pacman -S --noconfirm refind"
+    srun "arch-chroot /mnt refind-install"
+  fi
+
+  # ZRAM service
+  if [[ "$SWAP_MODE" == "zram" || "$SWAP_MODE" == "both" ]]; then
+    if (( ZRAM_MB == 0 )); then TOTAL_RAM_MB=$(arch-chroot /mnt bash -c "free -m | awk '/^Mem:/ {print \$2}'") ; ZRAM_MB=$(( TOTAL_RAM_MB/6 )); fi
+    cat > /mnt/etc/systemd/system/cerebro-zram.service <<EOF
+[Unit]
+Description=Configure zram for swap
+After=multi-user.target
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'modprobe zram; echo "$ZRAM_COMP" >/sys/block/zram0/comp_algorithm || true; echo $(( ${ZRAM_MB} * 1024 * 1024 )) >/sys/block/zram0/disksize || true; mkswap /dev/zram0 || true; swapon /dev/zram0 || true'
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+    srun "arch-chroot /mnt systemctl enable cerebro-zram.service"
+  fi
+
+  info "Post-install steps completed"
+}
+
+# -----------------------------
+# Main control (menu-driven)
+# -----------------------------
+main_menu(){
+  whiptail_check
+  local choice
+  if $USE_WHIPTAIL; then
+    choice=$(whiptail --title "Cerebro Installer" --menu "Choose mode" 15 60 4 \
+      1 "Run all steps (no pause)" \
+      2 "Step-by-step (pause after each)" \
+      3 "Resume from step N" 3>&1 1>&2 2>&3) || exit 1
+  else
+    echo "1) Run all steps"; echo "2) Step-by-step (pause after each)"; echo "3) Resume from step N"; read -rp "> " choice
+  fi
+  case "$choice" in
+    1) DEBUG_MODE=false; RESUME_STEP=1 ;;
+    2) DEBUG_MODE=true; RESUME_STEP=1 ;;
+    3)
+      RESUME_STEP=$(menu_input "resume" "Enter step number to resume from (1-${STEPS})" "1")
+      DEBUG_MODE=true
+      ;;
+    *) err "Invalid choice" ;;
+  esac
+
+  DRY_RUN=false
+  if menu_yesno "Dry-run" "Perform a dry-run (simulate disk writes and package installation)?"; then DRY_RUN=true; fi
+
+  # Run steps
+  for i in $(seq 1 $STEPS); do run_step $i; done
+  info "All requested steps completed"
+}
+
+# -----------------------------
+# Execute
+# -----------------------------
+main_menu
+
+# End of script
