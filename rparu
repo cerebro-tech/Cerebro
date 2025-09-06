@@ -1,3 +1,17 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/rparu
-"$HOME/cerebro_scripts/ram_build.sh" "$(pwd)" paru "$@"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# --- Setup RAM + swap ---
+"$SCRIPT_DIR/ram_build.sh" --setup-ram
+
+# --- Compile Paru if missing ---
+"$SCRIPT_DIR/ram_build.sh" --compile-paru
+
+# --- Run Paru in RAM ---
+if [[ "$1" == "-Syu" ]]; then
+    echo "[*] Running Paru -Syu with RAM acceleration..."
+    paru -Syu --noconfirm "$@"
+else
+    paru "$@"
+fi
