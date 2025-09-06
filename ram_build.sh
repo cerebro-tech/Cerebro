@@ -1,72 +1,65 @@
 #!/usr/bin/env bash
+# ~/cerebro_scripts/ram_build.sh
 set -euo pipefail
 
 SCRIPT_DIR="$HOME/cerebro_scripts"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <package-name-or-git-dir> [makepkg-args...]"
-    exit 1
-fi
+PACKAGE="$1"
+shift || true
+LOG_FILE="$LOG_DIR/ram_build-${PACKAGE}.log"
 
-PKG="$1"
-shift
-ARGS="$@"
+echo "[*] Building $PACKAGE in RAM..."
+echo "[*] Logging to $LOG_FILE"
 
-# Detect total RAM in MB
-TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-TOTAL_RAM_MB=$((TOTAL_RAM_MB / 1024))
+# 1. Determine available RAM
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+ZRAM_MB=$(( MEM_MB / 2 ))   # half RAM for zram
+BUILD_DIR="/tmp/ram_build_$PACKAGE"
 
-# Use safe fraction for tmpfs: max 80% RAM, minimum 512MB
-if [ "$TOTAL_RAM_MB" -lt 1024 ]; then
-    TMPFS_SIZE_MB=$((TOTAL_RAM_MB / 2))
-else
-    TMPFS_SIZE_MB=$((TOTAL_RAM_MB * 80 / 100))
-fi
-TMPFS_SIZE_MB=$(( TMPFS_SIZE_MB < 512 ? 512 : TMPFS_SIZE_MB ))
-
-# Create tmpfs for building
-BUILD_DIR="/tmp/ram_build_$PKG"
 mkdir -p "$BUILD_DIR"
-sudo mount -t tmpfs -o size=${TMPFS_SIZE_MB}M tmpfs "$BUILD_DIR"
 
-echo "[*] Building $PKG in RAM ($TMPFS_SIZE_MB MB tmpfs)..."
-
-# Copy source if it's a directory (git clone case)
-if [ -d "$PKG" ]; then
-    cp -a "$PKG" "$BUILD_DIR/$PKG"
-    cd "$BUILD_DIR/$PKG"
-else
-    cd "$BUILD_DIR"
-    # Try downloading from AUR if it's not local directory
-    git clone "https://aur.archlinux.org/$PKG.git"
-    cd "$PKG"
+# 2. Adjust swap priority if needed
+ZRAM_DEV="/dev/zram0"
+if ! grep -q "$ZRAM_DEV" /proc/swaps; then
+    echo "[*] Initializing ZRAM..."
+    sudo modprobe zram
+    echo $ZRAM_MB"M" | sudo tee /sys/block/zram0/disksize
+    sudo mkswap $ZRAM_DEV
+    sudo swapon -p 100 $ZRAM_DEV
 fi
 
-# Set up log file
-LOG_FILE="$LOG_DIR/ram_build-${PKG}.log"
-echo "[*] Logging build to $LOG_FILE"
-
-# Backup makepkg.conf and rust.conf if they exist
-[ -f /etc/makepkg.conf ] && sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak
-[ -f /etc/rust.conf ] && sudo cp /etc/rust.conf /etc/rust.conf.bak
-
-# Apply Cerebro configs if present
-[ -f "$HOME/.makepkg.conf" ] && sudo cp "$HOME/.makepkg.conf" /etc/makepkg.conf
-[ -f "$HOME/.rust.conf" ] && sudo cp "$HOME/.rust.conf" /etc/rust.conf
-
-# Build package
-if command -v makepkg &>/dev/null; then
-    makepkg -si $ARGS 2>&1 | tee "$LOG_FILE"
-else
-    echo "[!] makepkg not found. Install base-devel."
-    exit 1
+# Check for disk swap
+SWAP_ACTIVE=$(swapon --show=NAME | grep -v "$ZRAM_DEV" || true)
+if [ -n "$SWAP_ACTIVE" ]; then
+    sudo swapoff $SWAP_ACTIVE
+    sudo swapon -p 10 $SWAP_ACTIVE
 fi
 
-# Cleanup
-cd ~
-sudo umount "$BUILD_DIR" || true
+# 3. Build in RAM
+echo "[*] Copying sources to RAM build directory..."
+cp -r . "$BUILD_DIR" || true
+cd "$BUILD_DIR"
+
+# 4. Handle AUR or Pacman builds
+if [ "$PACKAGE" == "paru" ]; then
+    echo "[*] Building paru..."
+    git clone https://aur.archlinux.org/paru.git . &>> "$LOG_FILE"
+    makepkg -si --noconfirm &>> "$LOG_FILE"
+else
+    if command -v paru &>/dev/null; then
+        echo "[*] Using paru to build $PACKAGE..."
+        paru -S --noconfirm --needed "$PACKAGE" "$@" &>> "$LOG_FILE"
+    else
+        echo "[*] Using pacman to install $PACKAGE..."
+        sudo pacman -S --noconfirm --needed "$PACKAGE" "$@" &>> "$LOG_FILE"
+    fi
+fi
+
+# 5. Cleanup
+cd "$SCRIPT_DIR"
 rm -rf "$BUILD_DIR"
 
-echo "[*] Build completed for $PKG. Log saved in $LOG_FILE."
+echo "[*] Build finished: $PACKAGE"
+echo "[*] Check log: $LOG_FILE"
