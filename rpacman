@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/rpacman
 SCRIPT_DIR="$HOME/cerebro_scripts"
-
-# Check if running a full system update
-if [[ "$1" == "-Syu" ]]; then
-    echo "[*] Performing system update..."
-    sudo pacman -Syu --noconfirm
-else
-    # Build package in RAM
-    if [ ! -f "$SCRIPT_DIR/ram_build.sh" ]; then
-        echo "[!] ram_build.sh not found in $SCRIPT_DIR"
-        exit 1
-    fi
-    "$SCRIPT_DIR/ram_build.sh" "$@"
-fi
+"$SCRIPT_DIR/ram_build.sh" "$@"
