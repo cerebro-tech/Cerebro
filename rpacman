@@ -1,3 +1,14 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/rpacman
-"$HOME/cerebro_scripts/ram_build.sh" "$(pwd)" sudo pacman "$@"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# --- Check if ZRAM/Swap ready ---
+"$SCRIPT_DIR/ram_build.sh" --setup-ram
+
+# --- Update system fast using RAM where possible ---
+if [[ "$1" == "-Syu" ]]; then
+    echo "[*] Running Pacman -Syu with RAM acceleration..."
+    sudo pacman -Syu --noconfirm "$@"
+else
+    sudo pacman "$@"
+fi
