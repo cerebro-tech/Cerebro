@@ -1,81 +1,77 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 echo "[*] Starting Cerebro setup..."
 
-### ------------------------
-### 1. ZRAM + Swap Setup
-### ------------------------
-MEM_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
-ZRAM_SIZE_MB=$(( MEM_MB / 2 ))  # zram = half RAM
-ZRAM_DEV="/dev/zram0"
-
-# Load zram module
-if ! lsmod | grep -q zram; then
-    echo "[*] Loading zram module..."
-    modprobe zram
+# --- 1. Disable existing ZRAM ---
+echo "[*] Checking existing ZRAM devices..."
+if ls /dev/zram* &>/dev/null; then
+    echo "[*] Disabling existing ZRAM..."
+    for z in /dev/zram*; do
+        sudo swapoff "$z" 2>/dev/null || true
+    done
+    for z in /sys/block/zram*; do
+        echo 1 | sudo tee "$z/reset" >/dev/null
+    done
+    sudo modprobe -r zram 2>/dev/null || true
+    echo "[*] Existing ZRAM disabled."
+else
+    echo "[*] No existing ZRAM found."
 fi
 
-# Configure zram
-echo $ZRAM_SIZE_MB"M" > /sys/block/zram0/disksize
-echo lz4 > /sys/block/zram0/comp_algorithm
-mkswap $ZRAM_DEV
-swapon $ZRAM_DEV -p 100
-
-# Check if real swap partition exists
-SWAP_PART=$(swapon --show=NAME --noheadings | grep -v "$ZRAM_DEV" || true)
-if [[ -n "$SWAP_PART" ]]; then
-    echo "[*] Found real swap: $SWAP_PART, adjusting priorities..."
-    swapoff $SWAP_PART || true
-    swapon $SWAP_PART -p 50
+# --- 2. Check swap ---
+SWAP_ACTIVE=$(swapon --show --noheadings | wc -l)
+if [[ $SWAP_ACTIVE -gt 0 ]]; then
+    echo "[*] Swap partition detected and active. ZRAM priority will be higher."
+    ZRAM_PRIORITY=100
+    SWAP_PRIORITY=50
+else
+    echo "[*] No swap partition detected. Using ZRAM only."
+    ZRAM_PRIORITY=100
+    SWAP_PRIORITY=0
 fi
 
-### ------------------------
-### 2. Download helper scripts
-### ------------------------
-for script in ram_build.sh rpacman rparu; do
-    if [[ ! -f "$SCRIPT_DIR/$script" ]]; then
-        echo "[*] Downloading $script..."
-        curl -fsSL "https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/$script" -o "$SCRIPT_DIR/$script"
-        chmod +x "$SCRIPT_DIR/$script"
-    fi
+# --- 3. Setup ZRAM ---
+RAM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print $2}')  # in KB
+RAM_FOR_ZRAM=$(( (RAM_TOTAL / 2) * 1024 ))                    # in bytes
+echo "[*] Creating new ZRAM device with $((RAM_FOR_ZRAM / 1024 / 1024)) MB..."
+
+sudo modprobe zram
+echo 1 | sudo tee /sys/block/zram0/reset >/dev/null
+echo "$RAM_FOR_ZRAM" | sudo tee /sys/block/zram0/disksize >/dev/null
+sudo mkswap /dev/zram0
+sudo swapon -p $ZRAM_PRIORITY /dev/zram0
+echo "[*] ZRAM setup complete."
+
+# --- 4. Download required scripts ---
+SCRIPT_DIR="$HOME/cerebro_scripts"
+mkdir -p "$SCRIPT_DIR"
+
+echo "[*] Downloading ram_build.sh, rparu, rpacman..."
+for f in ram_build.sh rparu rpacman; do
+    curl -fsSL "https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/$f" -o "$SCRIPT_DIR/$f"
+    chmod +x "$SCRIPT_DIR/$f"
 done
 
-### ------------------------
-### 3. Backup config files
-### ------------------------
-for conf in makepkg.conf rust.conf; do
-    if [[ -f "/etc/$conf" ]]; then
-        echo "[*] Backing up $conf..."
-        cp -n "/etc/$conf" "/etc/$conf.bak"
+# --- 5. Backup and update configs ---
+for cfg in makepkg.conf rust.conf; do
+    if [[ -f "/etc/$cfg" ]]; then
+        echo "[*] Backing up /etc/$cfg to /etc/${cfg}.bak"
+        sudo cp "/etc/$cfg" "/etc/${cfg}.bak"
     fi
+    curl -fsSL "https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/$cfg" | sudo tee "/etc/$cfg" >/dev/null
 done
 
-### ------------------------
-### 4. Build paru if missing
-### ------------------------
+# --- 6. Install paru if missing ---
 if ! command -v paru &>/dev/null; then
     echo "[*] paru not found, building via ram_build..."
     "$SCRIPT_DIR/ram_build.sh" "https://aur.archlinux.org/paru.git"
 fi
 
-### ------------------------
-### 5. Install performance tools
-### ------------------------
-for tool in ninja mold pigz; do
-    if ! command -v $tool &>/dev/null; then
-        echo "[*] Installing $tool via rpacman..."
-        "$SCRIPT_DIR/rpacman" -S --noconfirm $tool
-    fi
-done
-
-### ------------------------
-### 6. Shell integration
-### ------------------------
+# --- 7. Shell integrations ---
 if [[ -f "$HOME/.zshrc" ]]; then
     echo "[*] Sourcing ~/.zshrc..."
     source "$HOME/.zshrc"
 fi
 
-echo "[*] Cerebro setup completed successfully!"
+echo "[*] Cerebro setup finished."
