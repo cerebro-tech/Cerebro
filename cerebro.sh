@@ -57,9 +57,8 @@ echo "[*] Downloading Cerebro scripts..."
 curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/ram_build.sh -o ram_build.sh
 curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rpacman -o rpacman
 curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rparu -o rparu
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/cerebro.sh -o cerebro.sh
 
-chmod +x ram_build.sh rpacman rparu cerebro.sh
+chmod +x ram_build.sh rpacman rparu
 
 # 4. Shell integration (zshrc, bashrc)
 echo "[*] Updating shell rc..."
