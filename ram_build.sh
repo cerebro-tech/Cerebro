@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[*] Starting RAM build environment..."
+LOG_DIR="$HOME/cerebro_scripts/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/ram_build.log"
+
+echo "[*] Starting RAM build environment..." | tee -a "$LOG_FILE"
 
 # Detect RAM, ZRAM, and SWAP
 RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print $2 / 1024}')
@@ -17,7 +21,7 @@ SAFE_RAM=$(( RAM_MB - 1536 ))
 
 # tmpfs size = safe RAM + ZRAM + SWAP
 TMPFS_SIZE=$(( SAFE_RAM + ZRAM_MB + SWAP_MB ))
-echo "[*] tmpfs size set to ${TMPFS_SIZE}M"
+echo "[*] tmpfs size set to ${TMPFS_SIZE}M" | tee -a "$LOG_FILE"
 
 # Create build dir
 BUILD_DIR="/tmp/ram_build.$$"
@@ -27,7 +31,7 @@ mkdir -p "$BUILD_DIR"
 sudo mount -t tmpfs -o size=${TMPFS_SIZE}M tmpfs "$BUILD_DIR"
 
 cleanup() {
-  echo "[*] Cleaning up RAM build..."
+  echo "[*] Cleaning up RAM build..." | tee -a "$LOG_FILE"
   sudo umount "$BUILD_DIR"
   rm -rf "$BUILD_DIR"
 }
@@ -42,7 +46,7 @@ else
   SRC_DIR="."
 fi
 
-echo "[*] Building from $SRC_DIR ..."
-"$@" || { echo "[!] Build failed"; exit 1; }
+echo "[*] Building from $SRC_DIR ..." | tee -a "$LOG_FILE"
+"$@" 2>&1 | tee -a "$LOG_FILE"
 
-echo "[✔] Build finished."
+echo "[✔] Build finished." | tee -a "$LOG_FILE"
