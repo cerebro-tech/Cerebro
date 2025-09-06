@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/rparu
 SCRIPT_DIR="$HOME/cerebro_scripts"
-
-# Ensure ram_build.sh exists
-if [ ! -f "$SCRIPT_DIR/ram_build.sh" ]; then
-    echo "[!] ram_build.sh not found in $SCRIPT_DIR"
-    exit 1
-fi
-
-# If first argument is -S or -Syu or package name, forward to ram_build.sh
-"$SCRIPT_DIR/ram_build.sh" "$@"
+"$SCRIPT_DIR/ram_build.sh" paru "$@"
