@@ -1,69 +1,75 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/ram_build.sh
-# Build any package in RAM using ZRAM or /tmp, auto-clean after finish
+# ram_build.sh - build packages fully in RAM for speed
 
 set -euo pipefail
 
-SCRIPT_DIR="$HOME/cerebro_scripts"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-BUILD_LOG="$LOG_DIR/ram_build-paru.log"
-PACKAGE="$1"
-RAM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+# Use ~1/6 of RAM as safe max build space
+BUILD_RAM_MB=$((RAM_MB / 6))
+[ "$BUILD_RAM_MB" -lt 512 ] && BUILD_RAM_MB=512  # minimum 512MB
 
-# Determine tmpfs size: 80% of RAM, min 1GB, max 32GB
-TMPFS_MB=$(( RAM_MB * 80 / 100 ))
-[ "$TMPFS_MB" -lt 1024 ] && TMPFS_MB=1024
-[ "$TMPFS_MB" -gt 32768 ] && TMPFS_MB=32768
-
-BUILD_DIR="/tmp/ram_build"
-rm -rf "$BUILD_DIR"
+BUILD_DIR="/dev/shm/ram_build"
 mkdir -p "$BUILD_DIR"
-mount -t tmpfs -o size=${TMPFS_MB}M tmpfs "$BUILD_DIR"
 
-echo "[*] Building package '$PACKAGE' in RAM at $BUILD_DIR"
-echo "[*] RAM: ${RAM_MB}MB, TMPFS size: ${TMPFS_MB}MB"
-echo "[*] Logs: $BUILD_LOG"
+log_file="$LOG_DIR/ram_build-paru.log"
 
-cd "$BUILD_DIR"
-
-# Helper function to cleanup tmpfs
-cleanup() {
-    echo "[*] Cleaning up RAM build directory..."
-    cd /
-    umount -l "$BUILD_DIR" || true
-    rm -rf "$BUILD_DIR"
+# --- Helper to copy source ---
+fetch_source() {
+    src_type="$1"
+    src_val="$2"
+    case "$src_type" in
+        git)
+            echo "[*] Cloning git repo $src_val..."
+            git clone --depth 1 "$src_val" "$BUILD_DIR/src"
+            ;;
+        tar)
+            echo "[*] Downloading tarball $src_val..."
+            curl -L "$src_val" -o "$BUILD_DIR/src.tar.gz"
+            mkdir -p "$BUILD_DIR/src"
+            tar -xzf "$BUILD_DIR/src.tar.gz" -C "$BUILD_DIR/src" --strip-components=1
+            ;;
+        pkg)
+            echo "[*] Copying local package $src_val..."
+            cp -r "$src_val" "$BUILD_DIR/src"
+            ;;
+        *)
+            echo "[!] Unknown source type: $src_type" >&2
+            exit 1
+            ;;
+    esac
 }
-trap cleanup EXIT
 
-# Determine package type and build
-if [[ "$PACKAGE" =~ \.tar\.gz$|\.tar\.bz2$|\.tar\.xz$ ]]; then
-    echo "[*] Detected tarball. Extracting..."
-    tar xf "$PACKAGE"
-    PKG_DIR=$(find . -maxdepth 1 -type d ! -name tmp* ! -name . -print | head -n1)
-    cd "$PKG_DIR"
-    echo "[*] Running makepkg..."
-    makepkg -si --noconfirm &> "$BUILD_LOG"
-elif [[ "$PACKAGE" =~ ^git\+ ]]; then
-    REPO="${PACKAGE#git+}"
-    echo "[*] Detected git repo: $REPO"
-    git clone "$REPO" repo_src &>> "$BUILD_LOG"
-    cd repo_src
-    if [ -f PKGBUILD ]; then
-        echo "[*] Running makepkg for PKGBUILD..."
-        makepkg -si --noconfirm &>> "$BUILD_LOG"
-    else
-        echo "[*] No PKGBUILD found, trying cmake/make..."
-        mkdir -p build && cd build
-        cmake .. &>> "$BUILD_LOG"
-        make -j$(nproc) &>> "$BUILD_LOG"
-        sudo make install &>> "$BUILD_LOG"
-    fi
-else
-    # Assume AUR package name
-    echo "[*] Building AUR package using paru..."
-    "$SCRIPT_DIR/rparu" "$PACKAGE" &> "$BUILD_LOG"
+# --- Main build function ---
+build_package() {
+    cd "$BUILD_DIR/src"
+    echo "[*] Building in RAM at $BUILD_DIR..."
+    makepkg -si --noconfirm | tee -a "$log_file"
+}
+
+# --- Usage check ---
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <git|tar|pkg> <source> [extra makepkg args]"
+    exit 1
 fi
 
-echo "[*] Build finished. Logs stored in $BUILD_LOG"
+SRC_TYPE="$1"
+SRC_VAL="$2"
+shift 2
+EXTRA_ARGS="$@"
+
+# --- Run ---
+rm -rf "$BUILD_DIR/src"
+fetch_source "$SRC_TYPE" "$SRC_VAL"
+cd "$BUILD_DIR/src"
+
+echo "[*] Starting build..."
+makepkg -si --noconfirm $EXTRA_ARGS | tee -a "$log_file"
+
+echo "[*] Cleaning RAM build dir..."
+rm -rf "$BUILD_DIR"
+
+echo "[*] Build finished. Log saved at $log_file"
