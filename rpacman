@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/rpacman
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-sudo pacman "$@"
+
+# If pacman is just installing from repos, no build needed
+# If building from a local PKGBUILD, wrap with ram_build.sh
+if [[ -f PKGBUILD ]]; then
+  exec "$SCRIPT_DIR/ram_build.sh" makepkg -si "$@"
+else
+  exec pacman "$@"
+fi
