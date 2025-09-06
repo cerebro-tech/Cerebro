@@ -1,101 +1,42 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/cerebro.sh
-# All-in-one Cerebro setup: RAM builds, wrappers, PATH, auto paru
+set -e
 
-set -euo pipefail
-SCRIPT_DIR="$HOME/cerebro_scripts"
-mkdir -p "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
 
-# --- Source shell configs ---
-[[ -f ~/.bashrc ]] && source ~/.bashrc
-[[ -f ~/.zshrc ]] && source ~/.zshrc
+echo "[*] Backing up configs..."
+[[ -f /etc/makepkg.conf ]] && sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak
+[[ -f /etc/rust.conf ]] && sudo cp /etc/rust.conf /etc/rust.conf.bak
 
-# --- Install paru if missing ---
-if ! command -v paru &>/dev/null; then
-    echo "[*] Installing paru..."
-    sudo pacman -Syu --needed --noconfirm git base-devel
-    cd "$SCRIPT_DIR"
-    git clone https://aur.archlinux.org/paru.git
-    cd paru
-    makepkg -si --noconfirm
-fi
+echo "[*] Downloading latest configs..."
+curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /etc/makepkg.conf
+curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o /etc/rust.conf
 
-# --- Ensure build tools ---
-for tool in mold ninja ccache pigz; do
-    sudo pacman -S --needed --noconfirm $tool || true
+echo "[*] Installing essential build tools..."
+sudo pacman -S --noconfirm ninja mold pigz base-devel git
+
+echo "[*] Setting up ZRAM + swap (run only once)..."
+TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+ZRAM_MB=$(( TOTAL_RAM_MB / 2 ))
+sudo modprobe zram num_devices=1
+echo "${ZRAM_MB}M" | sudo tee /sys/block/zram0/disksize
+sudo mkswap /dev/zram0
+sudo swapon --priority 200 /dev/zram0
+
+# Enable existing swap partitions with lower priority
+for s in $(swapon --show=NAME --noheadings); do
+    [[ "$s" != "/dev/zram0" ]] && sudo swapon --priority 100 "$s"
 done
 
-# --- RAM build script ---
-RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
-cat > "$RAM_BUILD" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-# --- Detect RAM ---
-TOTAL_RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-TOTAL_RAM_MB=$((TOTAL_RAM / 1024))
-AVAILABLE_RAM_MB=$((TOTAL_RAM_MB - 1500))
-[[ $AVAILABLE_RAM_MB -lt 512 ]] && AVAILABLE_RAM_MB=512
-
-# --- ZRAM setup ---
-ZRAM_SIZE_MB=$(( TOTAL_RAM_MB / 2 ))
-sudo modprobe zram num_devices=1
-echo $((ZRAM_SIZE_MB * 1024 * 1024)) | sudo tee /sys/block/zram0/disksize
-sudo mkswap /dev/zram0
-sudo swapon -p 100 /dev/zram0
-
-# --- Enable system swap ---
-SWAP_ACTIVE=$(swapon --show=NAME | wc -l)
-if [[ $SWAP_ACTIVE -le 0 ]]; then
-    echo "[*] No active swap"
-else
-    sudo swapon -a
+echo "[*] Compiling Paru if missing..."
+if ! command -v paru &>/dev/null; then
+    TMPDIR="$SCRIPT_DIR/tmp_paru"
+    mkdir -p "$TMPDIR"
+    git clone https://aur.archlinux.org/paru.git "$TMPDIR"
+    "$SCRIPT_DIR/ram_build.sh" "$TMPDIR" "ram_build-paru.log"
+    rm -rf "$TMPDIR"
 fi
 
-# --- Build in RAM ---
-SRC_DIR="${1:-$(pwd)}"
-BUILD_DIR=$(mktemp -d /dev/shm/ram_build_XXXX)
-echo "[*] Building in RAM: $BUILD_DIR"
-cd "$SRC_DIR"
-
-# --- Build command ---
-if [[ $# -gt 1 ]]; then
-    shift
-    "$@" | tee -a "$SRC_DIR/ram_build-paru.log"
-else
-    echo "[*] No command provided"
-fi
-
-# --- Cleanup ---
-rm -rf "$BUILD_DIR"
-sudo swapoff /dev/zram0 || true
-sudo rmmod zram || true
-EOF
-chmod +x "$RAM_BUILD"
-
-# --- rparu wrapper ---
-RPARU="$SCRIPT_DIR/rparu"
-cat > "$RPARU" <<EOF
-#!/usr/bin/env bash
-"$RAM_BUILD" "\$(pwd)" paru "\$@"
-EOF
-chmod +x "$RPARU"
-
-# --- rpacman wrapper ---
-RPACMAN="$SCRIPT_DIR/rpacman"
-cat > "$RPACMAN" <<EOF
-#!/usr/bin/env bash
-"$RAM_BUILD" "\$(pwd)" sudo pacman "\$@"
-EOF
-chmod +x "$RPACMAN"
-
-# --- Add cerebro_scripts to PATH ---
-if ! echo "$PATH" | grep -q "$SCRIPT_DIR"; then
-    echo "export PATH=\$PATH:$SCRIPT_DIR" >> ~/.bashrc
-    echo "export PATH=\$PATH:$SCRIPT_DIR" >> ~/.zshrc
-    source ~/.bashrc || true
-    source ~/.zshrc || true
-fi
-
-echo "[*] Cerebro environment ready!"
-echo "Use rparu <pkg> or rpacman <args> to build packages in RAM."
+echo "[*] Cerebro environment setup completed!"
