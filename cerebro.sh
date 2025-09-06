@@ -1,98 +1,87 @@
 #!/usr/bin/env bash
+# Cerebro setup script - full OS optimizations and RAM-aware builds
+
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$HOME/cerebro_scripts"
 mkdir -p "$SCRIPT_DIR"
 
-echo "[*] Detecting system RAM..."
-MEM_BYTES=$(grep MemTotal /proc/meminfo | awk '{print $2 * 1024}')
-RESERVE_BYTES=$(( 1_500 * 1024 * 1024 ))
-if (( MEM_BYTES <= RESERVE_BYTES )); then
-    BUILD_RAM=$(( MEM_BYTES / 2 ))
-else
-    BUILD_RAM=$(( MEM_BYTES - RESERVE_BYTES ))
-fi
+# -------------------------
+# 1️⃣ Detect and setup swap & ZRAM
+# -------------------------
+echo "[*] Checking swap and ZRAM..."
 
-echo "[*] Total RAM: $((MEM_BYTES/1024/1024)) MB, reserved: 1.5 GB, usable for builds: $((BUILD_RAM/1024/1024)) MB"
+TOTAL_MEM=$(grep MemTotal /proc/meminfo | awk '{print $2 * 1024}')
+ZRAM_SIZE=$((3*1024*1024*1024)) # 3 GB
+ZRAM_DEV="/dev/zram0"
 
-# ------------------------
-# 1️⃣ ZRAM & Swap Setup
-# ------------------------
-echo "[*] Setting up ZRAM..."
-ZRAM_SIZE=$(( BUILD_RAM / 2 ))
-if (( ZRAM_SIZE > 0 )); then
-    if ! systemctl is-active --quiet systemd-zram-setup@zram0; then
-        echo "ZRAM size: $((ZRAM_SIZE/1024/1024)) MB"
-        sudo systemctl enable --now systemd-zram-setup@zram0 || true
+# Enable swap if inactive
+if ! swapon --show | grep -q '^'; then
+    SWAP_PART=$(lsblk -o NAME,TYPE,SIZE,MOUNTPOINT | grep -E 'swap|SWAP' | awk '{print $1}' | head -n1)
+    if [[ -n "$SWAP_PART" ]]; then
+        echo "[*] Activating swap on /dev/$SWAP_PART..."
+        sudo mkswap "/dev/$SWAP_PART"
+        sudo swapon "/dev/$SWAP_PART"
+    else
+        echo "[*] No swap partition found. Will use only ZRAM."
     fi
-else
-    echo "[*] Skipping ZRAM setup (RAM too low or already active)"
 fi
 
-SWAP_ACTIVE=$(swapon --show=NAME | wc -l)
-if (( SWAP_ACTIVE > 0 )); then
-    echo "[*] Swap detected, ensuring priority..."
-    sudo swapon --show
-else
-    echo "[*] No swap detected, skipping swap adjustments"
+# Setup ZRAM
+if [[ ! -b "$ZRAM_DEV" ]]; then
+    echo "[*] Creating ZRAM device..."
+    echo lz4 | sudo tee /sys/block/zram0/comp_algorithm
+    echo "$ZRAM_SIZE" | sudo tee /sys/block/zram0/disksize
+    sudo mkswap "$ZRAM_DEV"
+    sudo swapon -p 100 "$ZRAM_DEV"
+    echo "[*] ZRAM enabled: $ZRAM_SIZE bytes with lz4"
 fi
 
-# ------------------------
-# 2️⃣ Install essential packages
-# ------------------------
-echo "[*] Installing essential packages: mold, ninja, ccache, pigz"
-sudo pacman -S --needed --noconfirm mold ninja ccache pigz curl git base-devel
+# Adjust swappiness
+sudo sysctl vm.swappiness=10
+sudo sysctl vm.vfs_cache_pressure=50
 
-# ------------------------
-# 3️⃣ Backup and update configs
-# ------------------------
-echo "[*] Backing up makepkg.conf and rust.conf..."
-sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak || true
-sudo cp /etc/rustc/rust.conf /etc/rustc/rust.conf.bak || true
+# -------------------------
+# 2️⃣ Install base dependencies
+# -------------------------
+echo "[*] Installing base dependencies..."
+sudo pacman -Syu --needed --noconfirm ninja cmake ccache mold wget
 
-echo "[*] Downloading optimized configs..."
-sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /etc/makepkg.conf
-sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o /etc/rustc/rust.conf
-
-# ------------------------
-# 4️⃣ Shell integration
-# ------------------------
-echo "[*] Detecting shell..."
-if [[ "$SHELL" =~ "zsh" ]]; then
-    SHELLRC="$HOME/.zshrc"
-else
-    SHELLRC="$HOME/.bashrc"
+# -------------------------
+# 3️⃣ Setup RAM build script
+# -------------------------
+RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
+if [[ ! -f "$RAM_BUILD" ]]; then
+    echo "[*] Downloading ram_build.sh..."
+    curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/ram_build.sh -o "$RAM_BUILD"
+    chmod +x "$RAM_BUILD"
 fi
 
-echo "[*] Adding source command to $SHELLRC..."
-grep -qxF "source $SCRIPT_DIR/*.sh" "$SHELLRC" || echo "source $SCRIPT_DIR/*.sh" >> "$SHELLRC"
-source "$SHELLRC"
-
-# ------------------------
-# 5️⃣ Download remaining Cerebro scripts
-# ------------------------
-echo "[*] Downloading scripts to $SCRIPT_DIR..."
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/ram_build.sh -o "$SCRIPT_DIR/ram_build.sh"
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rpacman -o "$SCRIPT_DIR/rpacman"
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rparu -o "$SCRIPT_DIR/rparu"
-
-chmod +x "$SCRIPT_DIR/"*.sh "$SCRIPT_DIR"/rparu "$SCRIPT_DIR"/rpacman
-
-# ------------------------
-# 6️⃣ Auto-detect tmpfs for builds
-# ------------------------
-echo "[*] Setting up tmpfs for RAM builds..."
-mkdir -p /tmp/ram_build
-sudo mount -t tmpfs -o size=${BUILD_RAM} tmpfs /tmp/ram_build || true
-echo "[*] tmpfs mounted at /tmp/ram_build, size: $((BUILD_RAM/1024/1024)) MB"
-
-# ------------------------
-# 7️⃣ Compile paru if missing
-# ------------------------
+# -------------------------
+# 4️⃣ Compile paru if missing
+# -------------------------
 if ! command -v paru &>/dev/null; then
-    echo "[*] paru not found, compiling via ram_build.sh..."
-    "$SCRIPT_DIR/ram_build.sh" https://aur.archlinux.org/paru.git
+    echo "[*] Paru not found, building via RAM build..."
+    cd "$SCRIPT_DIR"
+    git clone https://aur.archlinux.org/paru.git
+    cd paru
+    "$RAM_BUILD" .
+    echo "[*] Paru installed!"
 fi
 
-echo "[*] Cerebro setup completed successfully!"
+# -------------------------
+# 5️⃣ Shell integration
+# -------------------------
+# Add cerebro_scripts to PATH
+if ! grep -q "cerebro_scripts" ~/.bashrc; then
+    echo "export PATH=\"\$HOME/cerebro_scripts:\$PATH\"" >> ~/.bashrc
+    source ~/.bashrc
+fi
+
+if ! grep -q "cerebro_scripts" ~/.zshrc; then
+    echo "export PATH=\"\$HOME/cerebro_scripts:\$PATH\"" >> ~/.zshrc
+    source ~/.zshrc
+fi
+
+echo "[*] Cerebro setup finished!"
