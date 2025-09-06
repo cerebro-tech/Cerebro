@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rparu
-SCRIPT_DIR="$HOME/cerebro_scripts"
-"$SCRIPT_DIR/ram_build.sh" paru "$@"
+# rparu - build AUR packages in RAM
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
+
+# Make sure paru is installed; if not, build it first
+if ! command -v paru &>/dev/null; then
+    echo "[*] Paru not found. Installing via RAM build..."
+    $RAM_BUILD git https://aur.archlinux.org/paru.git
+fi
+
+# Pass all arguments to ram_build.sh if building AUR package
+if [[ "$1" == "-S"* ]]; then
+    # For AUR packages: clone and build in RAM
+    $RAM_BUILD pkg "/tmp/paru_build" "$@"
+else
+    # Default: pass to paru
+    paru "$@"
+fi
