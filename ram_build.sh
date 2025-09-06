@@ -1,46 +1,48 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/ram_build.sh
-# Ram-based package build script
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-LOG_FILE="$HOME/cerebro_scripts/ram_build.log"
+set -euo pipefail
 
-echo "[*] Starting RAM build: $(date)" | tee -a "$LOG_FILE"
+echo "[*] Starting RAM build environment..."
 
-# Auto-detect RAM in MB
-MEM_MB=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
-RAM_BUILD=$(( MEM_MB - 1536 )) # Use all RAM minus 1.5GB
-if (( RAM_BUILD < 512 )); then
-    echo "[!] Not enough RAM, using fallback 512MB" | tee -a "$LOG_FILE"
-    RAM_BUILD=512
-fi
+# Detect RAM, ZRAM, and SWAP
+RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print $2 / 1024}')
+ZRAM_MB=$(swapon --show | awk '/zram/ {sum += $3} END {print sum/1024}')
+SWAP_MB=$(swapon --show | awk '/partition/ {sum += $3} END {print sum/1024}')
 
-echo "[*] Using $RAM_BUILD MB tmpfs for build" | tee -a "$LOG_FILE"
+: "${ZRAM_MB:=0}"
+: "${SWAP_MB:=0}"
+
+# Reserve 1.5GB from real RAM
+SAFE_RAM=$(( RAM_MB - 1536 ))
+[ $SAFE_RAM -lt 512 ] && SAFE_RAM=512
+
+# tmpfs size = safe RAM + ZRAM + SWAP
+TMPFS_SIZE=$(( SAFE_RAM + ZRAM_MB + SWAP_MB ))
+echo "[*] tmpfs size set to ${TMPFS_SIZE}M"
+
+# Create build dir
+BUILD_DIR="/tmp/ram_build.$$"
+mkdir -p "$BUILD_DIR"
 
 # Mount tmpfs
-BUILD_TMP=$(mktemp -d)
-sudo mount -t tmpfs -o size=${RAM_BUILD}M tmpfs "$BUILD_TMP"
+sudo mount -t tmpfs -o size=${TMPFS_SIZE}M tmpfs "$BUILD_DIR"
 
-# Detect CMake generator
-if command -v ninja >/dev/null 2>&1; then
-    CMAKE_GEN="-G Ninja"
+cleanup() {
+  echo "[*] Cleaning up RAM build..."
+  sudo umount "$BUILD_DIR"
+  rm -rf "$BUILD_DIR"
+}
+trap cleanup EXIT
+
+cd "$BUILD_DIR"
+
+# Auto-detect source dir if CMake
+if [ -f "$OLDPWD/CMakeLists.txt" ]; then
+  SRC_DIR="$OLDPWD"
 else
-    CMAKE_GEN=""
+  SRC_DIR="."
 fi
 
-export CCACHE_DIR="$HOME/.ccache"
-export USE_CCACHE=1
-export PATH="$HOME/.cargo/bin:$PATH"
+echo "[*] Building from $SRC_DIR ..."
+"$@" || { echo "[!] Build failed"; exit 1; }
 
-echo "[*] Starting build in $BUILD_TMP" | tee -a "$LOG_FILE"
-cd "$BUILD_TMP" || exit 1
-
-# Example build command
-cmake $CMAKE_GEN /path/to/source -DCMAKE_BUILD_TYPE=Release
-cmake --build . --parallel "$(nproc)" | tee -a "$LOG_FILE"
-
-echo "[*] Build finished, cleaning tmpfs" | tee -a "$LOG_FILE"
-cd "$HOME"
-sudo umount "$BUILD_TMP"
-rm -rf "$BUILD_TMP"
-
-echo "[*] Done: $(date)" | tee -a "$LOG_FILE"
+echo "[✔] Build finished."
