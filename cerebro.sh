@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/cerebro.sh
+# Cerebro setup: ZRAM, swap, build tools, configs, paru, optimizations
+
 set -euo pipefail
 
 SCRIPT_DIR="$HOME/cerebro_scripts"
@@ -8,59 +10,68 @@ mkdir -p "$LOG_DIR"
 
 echo "[*] Starting Cerebro setup..."
 
-# 1. Setup ZRAM and Swap
-echo "[*] Configuring ZRAM and swap..."
-MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-ZRAM_SIZE_MB=$(( MEM_MB / 2 ))  # Use half RAM for zram
-ZRAM_DEV="/dev/zram0"
+# 1️⃣ Detect available RAM
+MEM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+echo "[*] Detected RAM: ${MEM_MB}MB"
 
-if ! grep -q "$ZRAM_DEV" /proc/swaps; then
-    echo "[*] Initializing ZRAM..."
-    sudo modprobe zram
-    echo $ZRAM_SIZE_MB"M" | sudo tee /sys/block/zram0/disksize
-    sudo mkswap $ZRAM_DEV
-    sudo swapon -p 100 $ZRAM_DEV
+# 2️⃣ Setup ZRAM
+echo "[*] Setting up ZRAM..."
+ZRAM_SIZE_MB=$(( MEM_MB / 2 ))
+modprobe zram
+echo $ZRAM_SIZE_MB > /sys/block/zram0/disksize
+mkswap /dev/zram0
+swapon -p 100 /dev/zram0
+echo "[*] ZRAM size: ${ZRAM_SIZE_MB}MB with priority 100"
+
+# 3️⃣ Detect existing swap partitions
+if swapon --show | grep -q '^'; then
+    echo "[*] Swap detected, lowering priority to 50..."
+    for sw in $(swapon --show=NAME --noheadings); do
+        swapoff "$sw"
+        swapon -p 50 "$sw"
+    done
+else
+    echo "[*] No swap partition found, only ZRAM will be used."
 fi
 
-# Check for any active swap partition
-SWAP_ACTIVE=$(swapon --show=NAME | grep -v "$ZRAM_DEV" || true)
-if [ -n "$SWAP_ACTIVE" ]; then
-    echo "[*] Lowering priority of disk swap..."
-    sudo swapoff $SWAP_ACTIVE
-    sudo swapon -p 10 $SWAP_ACTIVE
-fi
+# 4️⃣ Update system & install base packages
+echo "[*] Installing base packages..."
+sudo pacman -Sy --noconfirm \
+  base base-devel linux-zen linux-firmware intel-ucode \
+  networkmanager sudo zsh xfsprogs e2fsprogs efivar \
+  git curl wget unzip tar
 
-# 2. Install required build tools
-echo "[*] Installing Ninja, Mold, Pigz..."
-sudo pacman -S --needed --noconfirm ninja mold pigz
+# 5️⃣ Install build tools: mold, ninja, pigz
+echo "[*] Installing build tools..."
+sudo pacman -Sy --noconfirm ninja pigz
+sudo pacman -Sy --noconfirm --needed mold || true
 
-# 3. Backup and update makepkg.conf and rust.conf
+# 6️⃣ Backup and replace makepkg.conf and rust.conf
 echo "[*] Backing up makepkg.conf and rust.conf..."
-sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak || true
-sudo cp /etc/rust.conf /etc/rust.conf.bak || true
+[ -f /etc/makepkg.conf ] && sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak
+sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /etc/makepkg.conf
 
-echo "[*] Downloading latest configs..."
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /tmp/makepkg.conf
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o /tmp/rust.conf
+[ -f /etc/rust.conf ] && sudo cp /etc/rust.conf /etc/rust.conf.bak
+sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o /etc/rust.conf
 
-sudo mv /tmp/makepkg.conf /etc/makepkg.conf
-sudo mv /tmp/rust.conf /etc/rust.conf
+# 7️⃣ Source shell configs
+echo "[*] Sourcing shell configs..."
+source ~/.bashrc || true
+[ -f ~/.zshrc ] && source ~/.zshrc
 
-# 4. Shell integration
-echo "[*] Updating shell configurations..."
-grep -qxF "source ~/.bashrc" ~/.bashrc || echo "source ~/.bashrc" >> ~/.bashrc
-grep -qxF "source ~/.zshrc" ~/.zshrc || echo "source ~/.zshrc" >> ~/.zshrc
-source ~/.bashrc
-source ~/.zshrc
-
-# 5. Compile paru via ram_build.sh if missing
+# 8️⃣ Compile paru if missing
 if ! command -v paru &>/dev/null; then
     echo "[*] Paru not found, compiling via ram_build.sh..."
-    if [ ! -f "$SCRIPT_DIR/ram_build.sh" ]; then
-        echo "[!] ram_build.sh not found in $SCRIPT_DIR"
-        exit 1
-    fi
-    "$SCRIPT_DIR/ram_build.sh" paru
+    "$SCRIPT_DIR/ram_build.sh" git+https://aur.archlinux.org/paru.git
 fi
 
-echo "[*] Cerebro setup completed."
+# 9️⃣ Download rparu and rpacman helpers
+echo "[*] Downloading rparu and rpacman..."
+curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rparu -o "$SCRIPT_DIR/rparu"
+curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rpacman -o "$SCRIPT_DIR/rpacman"
+chmod +x "$SCRIPT_DIR/rparu" "$SCRIPT_DIR/rpacman"
+
+# 1️⃣0️⃣ Final message
+echo "[*] Cerebro setup complete! You can now use:"
+echo "    $SCRIPT_DIR/rparu <package>  # Build AUR packages in RAM"
+echo "    $SCRIPT_DIR/rpacman <package> # Build/install packages in RAM"
