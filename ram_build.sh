@@ -1,60 +1,82 @@
 #!/usr/bin/env bash
 # ~/cerebro_scripts/ram_build.sh
-# Build any source in RAM with optional ZRAM + swap fallback
-
 set -euo pipefail
 
-# --- Detect RAM ---
-TOTAL_RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo) # KB
-TOTAL_RAM_MB=$((TOTAL_RAM / 1024))
-AVAILABLE_RAM_MB=$((TOTAL_RAM_MB - 1500)) # leave 1.5GB for system
-[[ $AVAILABLE_RAM_MB -lt 512 ]] && AVAILABLE_RAM_MB=512
+# --- Detect total RAM and set limits ---
+TOTAL_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
+# Use TOTAL_RAM - 1.5G for build
+BUILD_RAM_MB=$(( TOTAL_RAM_MB - 1536 ))
+BUILD_RAM_MB=$(( BUILD_RAM_MB > 512 ? BUILD_RAM_MB : 512 ))  # minimum 512MB
+TMP_BUILD_DIR="/dev/shm/ram_build"
 
-# --- Detect swap ---
-SWAP_ACTIVE=$(swapon --show=NAME | wc -l)
-USE_SWAP=true
-if [[ $SWAP_ACTIVE -le 0 ]]; then
-    USE_SWAP=false
+mkdir -p "$TMP_BUILD_DIR"
+
+log_file="$TMP_BUILD_DIR/ram_build-paru.log"
+
+# --- Function to compile in RAM ---
+build_in_ram() {
+    local src_dir="$1"
+    local install_cmd="$2"
+
+    if [ ! -d "$src_dir" ]; then
+        echo "[!] Source directory $src_dir not found" | tee -a "$log_file"
+        return 1
+    fi
+
+    echo "[*] Copying source to RAM..." | tee -a "$log_file"
+    rsync -a "$src_dir/" "$TMP_BUILD_DIR/src/"
+
+    pushd "$TMP_BUILD_DIR/src" >/dev/null
+
+    echo "[*] Starting build in RAM..." | tee -a "$log_file"
+    mkdir -p build && cd build
+    cmake .. -DCMAKE_BUILD_TYPE=Release
+    ninja -j"$(( BUILD_RAM_MB / 2 ))"
+    $install_cmd | tee -a "$log_file"
+
+    popd >/dev/null
+    echo "[*] Cleaning RAM build..." | tee -a "$log_file"
+    rm -rf "$TMP_BUILD_DIR/src"
+}
+
+# --- Setup ZRAM and SWAP ---
+if [[ "$1" == "--setup-ram" ]]; then
+    # Determine swap partitions
+    SWAP_ACTIVE=$(swapon --show=NAME | wc -l)
+    echo "[*] Setting up ZRAM and Swap..." | tee -a "$log_file"
+    sudo modprobe zram num_devices=1
+    echo $(( TOTAL_RAM_MB / 2 ))M | sudo tee /sys/block/zram0/disksize
+    sudo mkswap /dev/zram0
+    if [ "$SWAP_ACTIVE" -gt 0 ]; then
+        sudo swapon --priority 50 /dev/zram0
+    else
+        sudo swapon /dev/zram0
+    fi
+    exit 0
 fi
 
-# --- ZRAM config ---
-ZRAM_SIZE_MB=$(( TOTAL_RAM_MB / 2 ))
-sudo modprobe zram num_devices=1
-echo $((ZRAM_SIZE_MB * 1024 * 1024)) | sudo tee /sys/block/zram0/disksize
-sudo mkswap /dev/zram0
-sudo swapon -p 100 /dev/zram0
-
-# --- Activate swap if exists ---
-if $USE_SWAP; then
-    sudo swapon -a
+# --- Compile Paru if missing ---
+if [[ "$1" == "--compile-paru" ]]; then
+    if ! command -v paru &>/dev/null; then
+        echo "[*] Paru not found. Compiling in RAM..." | tee -a "$log_file"
+        mkdir -p "$TMP_BUILD_DIR/paru"
+        git clone https://aur.archlinux.org/paru.git "$TMP_BUILD_DIR/paru"
+        build_in_ram "$TMP_BUILD_DIR/paru" "makepkg -si --noconfirm"
+        echo "[*] Paru installed." | tee -a "$log_file"
+    else
+        echo "[*] Paru already installed." | tee -a "$log_file"
+    fi
+    exit 0
 fi
 
-# --- RAM build dir ---
-SRC_DIR="${1:-$(pwd)}"
-BUILD_DIR=$(mktemp -d /dev/shm/ram_build_XXXX)
-echo "[*] Building in RAM: $BUILD_DIR"
-cd "$SRC_DIR"
-
-# --- Backup makepkg.conf / rust.conf ---
-for cfg in /etc/makepkg.conf ~/.cargo/config.toml; do
-    [[ -f "$cfg" ]] && cp "$cfg" "$cfg.bak"
-done
-
-# --- Download optimized configs ---
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /etc/makepkg.conf
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o ~/.cargo/config.toml
-
-# --- Build ---
-echo "[*] Starting build..."
-if [[ $# -gt 1 ]]; then
+# --- General build command ---
+if [[ $# -ge 1 ]]; then
+    SRC_DIR="$1"
     shift
-    "$@" | tee -a "$SRC_DIR/ram_build-paru.log"
+    build_in_ram "$SRC_DIR" "$@"
 else
-    echo "[*] No command provided to build"
+    echo "Usage: $0 <source_dir> <install_command>"
+    echo "       $0 --setup-ram"
+    echo "       $0 --compile-paru"
+    exit 1
 fi
-
-# --- Cleanup ---
-echo "[*] Cleaning RAM build directory..."
-rm -rf "$BUILD_DIR"
-sudo swapoff /dev/zram0 || true
-sudo rmmod zram || true
