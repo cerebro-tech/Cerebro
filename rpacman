@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
-# Run pacman in RAM
+# Run pacman in RAM if enough memory, otherwise fallback to normal
+
+set -euo pipefail
+IFS=$'\n\t'
+
+MIN_RAM=$((2 * 1024 * 1024 * 1024)) # 2 GB minimum for RAM build
+TOTAL_MEM=$(grep MemTotal /proc/meminfo | awk '{print $2 * 1024}')
 
 BUILD_DIR="/tmp/ram_build"
 LOG_FILE="$BUILD_DIR/ram_build-paru.log"
 
-mkdir -p "$BUILD_DIR"
-echo "[*] Running pacman in RAM build dir $BUILD_DIR..."
-sudo pacman "$@" | tee -a "$LOG_FILE"
+if (( TOTAL_MEM >= MIN_RAM )); then
+    mkdir -p "$BUILD_DIR"
+    echo "[*] Enough RAM ($((TOTAL_MEM/1024/1024)) MB), running pacman in RAM build dir $BUILD_DIR..."
+    sudo pacman "$@" | tee -a "$LOG_FILE"
+else
+    echo "[*] Low RAM ($((TOTAL_MEM/1024/1024)) MB), running pacman normally..."
+    sudo pacman "$@"
+fi
