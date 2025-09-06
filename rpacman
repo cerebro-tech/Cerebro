@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# rpacman - Cerebro RAM build wrapper for pacman
-set -euo pipefail
-
+# ~/cerebro_scripts/rpacman
 SCRIPT_DIR="$HOME/cerebro_scripts"
-LOG_DIR="$SCRIPT_DIR/logs"
-mkdir -p "$LOG_DIR"
 
-ACTION="$1"
-shift || true
-
-RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
-
-echo "[*] rpacman called with action: $ACTION $*"
-
-# Only wrap install/update packages
-if [[ "$ACTION" =~ ^(S|Syu|U)$ ]]; then
-    echo "[*] Using RAM build for packages..."
-    $RAM_BUILD "$@" | tee -a "$LOG_DIR/rpacman.log"
+# Check if running a full system update
+if [[ "$1" == "-Syu" ]]; then
+    echo "[*] Performing system update..."
+    sudo pacman -Syu --noconfirm
 else
-    echo "[*] Default pacman call..."
-    sudo pacman "$ACTION" "$@"
+    # Build package in RAM
+    if [ ! -f "$SCRIPT_DIR/ram_build.sh" ]; then
+        echo "[!] ram_build.sh not found in $SCRIPT_DIR"
+        exit 1
+    fi
+    "$SCRIPT_DIR/ram_build.sh" "$@"
 fi
