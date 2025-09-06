@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rparu
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# rparu - Cerebro RAM build wrapper for paru
+set -euo pipefail
 
-# --- Setup RAM + swap ---
-"$SCRIPT_DIR/ram_build.sh" --setup-ram
+SCRIPT_DIR="$HOME/cerebro_scripts"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
 
-# --- Compile Paru if missing ---
-"$SCRIPT_DIR/ram_build.sh" --compile-paru
+ACTION="$1"
+shift || true
 
-# --- Run Paru in RAM ---
-if [[ "$1" == "-Syu" ]]; then
-    echo "[*] Running Paru -Syu with RAM acceleration..."
-    paru -Syu --noconfirm "$@"
+RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
+
+echo "[*] rparu called with action: $ACTION $*"
+
+# Only wrap install/update packages
+if [[ "$ACTION" =~ ^(S|Syu|U)$ ]]; then
+    echo "[*] Using RAM build for AUR packages..."
+    $RAM_BUILD "$@" | tee -a "$LOG_DIR/rparu.log"
 else
-    paru "$@"
+    echo "[*] Default paru call..."
+    paru "$ACTION" "$@"
 fi
