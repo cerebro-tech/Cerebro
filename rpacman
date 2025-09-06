@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rpacman
+# Run pacman in RAM
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+BUILD_DIR="/tmp/ram_build"
+LOG_FILE="$BUILD_DIR/ram_build-paru.log"
 
-# If pacman is just installing from repos, no build needed
-# If building from a local PKGBUILD, wrap with ram_build.sh
-if [[ -f PKGBUILD ]]; then
-  exec "$SCRIPT_DIR/ram_build.sh" makepkg -si "$@"
-else
-  exec pacman "$@"
-fi
+mkdir -p "$BUILD_DIR"
+echo "[*] Running pacman in RAM build dir $BUILD_DIR..."
+sudo pacman "$@" | tee -a "$LOG_FILE"
