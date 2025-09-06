@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rpacman
-SCRIPT_DIR="$HOME/cerebro_scripts"
-"$SCRIPT_DIR/ram_build.sh" "$@"
+# rpacman - build official packages in RAM if possible
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
+
+# For normal updates: just call pacman
+if [[ "$1" == "-Syu" ]]; then
+    pacman -Syu "$@"
+else
+    # Build in RAM using ram_build.sh
+    $RAM_BUILD pkg "/tmp/pacman_build" "$@"
+fi
