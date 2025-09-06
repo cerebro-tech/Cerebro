@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rparu
+# Run paru in RAM
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+BUILD_DIR="/tmp/ram_build"
+LOG_FILE="$BUILD_DIR/ram_build-paru.log"
 
-# Ensure paru config exists
-mkdir -p "$HOME/.config/paru"
-
-CONF="$HOME/.config/paru/paru.conf"
-
-# Inject custom makepkg command if missing
-if ! grep -q "makepkg_command" "$CONF" 2>/dev/null; then
-  {
-    echo "[options]"
-    echo "makepkg_command = $SCRIPT_DIR/ram_build.sh makepkg"
-  } >> "$CONF"
-fi
-
-exec paru "$@"
+mkdir -p "$BUILD_DIR"
+echo "[*] Running paru in RAM build dir $BUILD_DIR..."
+paru "$@" | tee -a "$LOG_FILE"
