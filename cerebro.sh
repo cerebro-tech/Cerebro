@@ -1,68 +1,70 @@
 #!/usr/bin/env bash
-# cerebro.sh - Super setup + RAM build integration
+# cerebro.sh - Download and setup RAM build environment
 
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-LOG_DIR="$SCRIPT_DIR/logs"
-mkdir -p "$LOG_DIR"
 
-# --- 1️⃣ Detect RAM and configure ZRAM & swap ---
-echo "[*] Configuring RAM stack (RAM + ZRAM + swap)..."
+echo "[*] Starting Cerebro environment setup..."
+
+# 1. Setup ZRAM + SWAP
+echo "[*] Configuring ZRAM and SWAP..."
 MEM_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
-AVAILABLE_RAM_MB=$((MEM_MB - 1536)) # RAM - 1.5 GB for system
-ZRAM_MB=$((AVAILABLE_RAM_MB / 2))
-SWAP_PART=$(findmnt -n -o SOURCE -T /swapfile || echo "")
-
-# Setup ZRAM
-if ! swapon --show | grep -q zram0; then
-    echo "[*] Initializing ZRAM: $ZRAM_MB MiB"
-    sudo modprobe zram
-    echo $ZRAM_MB | sudo tee /sys/block/zram0/disksize
-    sudo mkswap /dev/zram0
-    sudo swapon /dev/zram0
+ZRAM_SIZE_MB=$(( MEM_MB / 2 ))   # Half of total RAM for ZRAM
+SWAP_ACTIVE=$(swapon --show | wc -l)
+if (( SWAP_ACTIVE > 0 )); then
+    echo "[*] Swap detected, prioritizing ZRAM over swap..."
+    swapon -s
+else
+    echo "[*] No swap detected, using only ZRAM..."
 fi
 
-# Activate swap partition if exists
-if [ -n "$SWAP_PART" ] && ! swapon --show | grep -q "$SWAP_PART"; then
-    echo "[*] Activating swap partition: $SWAP_PART"
-    sudo swapon "$SWAP_PART"
-fi
+modprobe zram num_devices=1
+echo $((ZRAM_SIZE_MB * 1024 * 1024)) > /sys/block/zram0/disksize
+mkfs.ext4 /dev/zram0
+mount -o defaults /dev/zram0 /mnt/tmp || true
 
-# --- 2️⃣ Backup configs ---
-echo "[*] Backing up makepkg.conf and rust.conf..."
-[ -f /etc/makepkg.conf ] && sudo cp /etc/makepkg.conf /etc/makepkg.conf.bak
-[ -f /etc/rust.conf ] && sudo cp /etc/rust.conf /etc/rust.conf.bak
+# 2. Backup makepkg.conf and rust.conf
+echo "[*] Backing up configs..."
+for f in /etc/makepkg.conf /etc/rustc/rust.conf; do
+    if [[ -f $f ]]; then
+        cp "$f" "$f.bak_$(date +%s)"
+        echo "[*] Backup created: $f.bak_$(date +%s)"
+    fi
+done
 
-# Download optimized configs
-sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf -o /etc/makepkg.conf
-sudo curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rust.conf -o /etc/rust.conf
+# 3. Download necessary scripts/tools from GitHub
+echo "[*] Downloading RAM build scripts and tools..."
+mkdir -p "$SCRIPT_DIR"/tools
 
-# --- 3️⃣ Install essential build tools ---
-echo "[*] Installing build tools: base-devel, ninja, mold, pigz..."
-sudo pacman -Syu --noconfirm base-devel ninja mold pigz
+TOOLS=(
+    "ram_build.sh"
+    "rparu"
+    "rpacman"
+)
 
-# --- 4️⃣ Download RAM build scripts ---
-echo "[*] Downloading RAM build scripts from GitHub..."
-mkdir -p "$SCRIPT_DIR/cerebro_scripts"
-cd "$SCRIPT_DIR/cerebro_scripts"
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/ram_build.sh -o ram_build.sh
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rpacman -o rpacman
-curl -fsSL https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/rparu -o rparu
-chmod +x ram_build.sh rpacman rparu
+for tool in "${TOOLS[@]}"; do
+    curl -fsSL "https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/$tool" -o "$SCRIPT_DIR/tools/$tool"
+    chmod +x "$SCRIPT_DIR/tools/$tool"
+done
 
-# --- 5️⃣ Compile paru if missing ---
+# 4. Install required build utilities
+echo "[*] Installing build utilities (mold, ninja, pigz)..."
+for pkg in mold ninja pigz; do
+    if ! command -v "$pkg" &>/dev/null; then
+        echo "[*] Installing $pkg..."
+        paru -S --noconfirm "$pkg"
+    fi
+done
+
+# 5. Compile paru if missing
 if ! command -v paru &>/dev/null; then
-    echo "[*] Paru not found, building in RAM..."
-    ./ram_build.sh paru
+    echo "[*] Paru not found, compiling with RAM build..."
+    "$SCRIPT_DIR/tools/ram_build.sh" https://aur.archlinux.org/paru.git
 fi
 
-# --- 6️⃣ Shell integration ---
-echo "[*] Sourcing zshrc if exists..."
-[ -f ~/.zshrc ] && source ~/.zshrc
-[ -f ~/.bashrc ] && source ~/.bashrc
+# 6. Shell integration
+echo "[*] Sourcing shell configurations..."
+[[ -f ~/.bashrc ]] && source ~/.bashrc
+[[ -f ~/.zshrc ]] && source ~/.zshrc
 
-echo "[*] Cerebro setup complete. You can now use:"
-echo "  ~/cerebro_scripts/ram_build.sh <package|git|tarball>"
-echo "  ~/cerebro_scripts/rpacman <args>  # builds pacman packages in RAM"
-echo "  ~/cerebro_scripts/rparu <args>    # builds AUR packages in RAM"
+echo "[*] Cerebro environment setup completed!"
