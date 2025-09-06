@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/rpacman
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# rpacman - Cerebro RAM build wrapper for pacman
+set -euo pipefail
 
-# --- Check if ZRAM/Swap ready ---
-"$SCRIPT_DIR/ram_build.sh" --setup-ram
+SCRIPT_DIR="$HOME/cerebro_scripts"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
 
-# --- Update system fast using RAM where possible ---
-if [[ "$1" == "-Syu" ]]; then
-    echo "[*] Running Pacman -Syu with RAM acceleration..."
-    sudo pacman -Syu --noconfirm "$@"
+ACTION="$1"
+shift || true
+
+RAM_BUILD="$SCRIPT_DIR/ram_build.sh"
+
+echo "[*] rpacman called with action: $ACTION $*"
+
+# Only wrap install/update packages
+if [[ "$ACTION" =~ ^(S|Syu|U)$ ]]; then
+    echo "[*] Using RAM build for packages..."
+    $RAM_BUILD "$@" | tee -a "$LOG_DIR/rpacman.log"
 else
-    sudo pacman "$@"
+    echo "[*] Default pacman call..."
+    sudo pacman "$ACTION" "$@"
 fi
