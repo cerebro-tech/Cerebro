@@ -65,7 +65,7 @@ done
 # --- 6. Install paru if missing ---
 if ! command -v paru &>/dev/null; then
     echo "[*] paru not found, building via ram_build..."
-    "$SCRIPT_DIR/ram_build.sh" "paru" "https://aur.archlinux.org/paru.git"
+    "$SCRIPT_DIR/ram_build.sh" "paru" "git" "https://aur.archlinux.org/paru.git"
 fi
 
 # --- 7. Shell integrations ---
