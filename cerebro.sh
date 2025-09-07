@@ -62,16 +62,9 @@ for cfg in makepkg.conf rust.conf; do
     curl -fsSL "https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/$cfg" | sudo tee "/etc/$cfg" >/dev/null
 done
 
-# --- 6. Install paru if missing ---
-if ! command -v paru &>/dev/null; then
-    echo "[*] paru not found, building via ram_build..."
-    "$SCRIPT_DIR/ram_build.sh" "paru" "git" "https://aur.archlinux.org/paru.git"
-fi
+# 6. Shell integration
+echo "[*] Sourcing shell configurations..."
+[[ -f ~/.bashrc ]] && source ~/.bashrc
+[[ -f ~/.zshrc ]] && source ~/.zshrc
 
-# --- 7. Shell integrations ---
-if [[ -f "$HOME/.zshrc" ]]; then
-    echo "[*] Sourcing ~/.zshrc..."
-    source "$HOME/.zshrc"
-fi
-
-echo "[*] Cerebro setup finished."
+echo "[*] Cerebro environment setup completed!"
