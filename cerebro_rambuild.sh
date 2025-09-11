@@ -1,129 +1,123 @@
 #!/usr/bin/env bash
-# cbro — universal RAM build script (optimized)
-#
-# Requirements (install manually if missing):
-#   base-devel git wget zram kernel module
-#
-# Features:
-# - Always fresh tmpfs build dir (/mnt/cerebro)
-# - Always reset ZRAM each run
-# - Persistent logs in ~/cerebro/log/
-# - Copy results to ~/pkgbuilds/
-# - Works with local dir, AUR package, or URL
+# cerebro build script (cbro)
 
 set -euo pipefail
 
-### CONFIGURATION ###
-CEREBRO_DIR="$HOME/cerebro"
-LOG_DIR="$CEREBRO_DIR/log"
-PKG_DST="$HOME/pkgbuilds"
-RAM_DIR="/mnt/cerebro"
+CEREBRO_DIR="/mnt/cerebro"
+CACHE_DIR="/var/cache/cerebro"
+LOG_DIR="$HOME/cerebro/log"
 ZRAM_DEV="/dev/zram0"
-PKG_SRC="${1:-}"    # local path, AUR package name, or URL
 
-mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DST"
+mkdir -p "$CACHE_DIR/aur" "$LOG_DIR"
 
-### FUNCTIONS ###
-
-error_exit() {
-    echo "[!] Error: $*" >&2
-    exit 1
+# ------------------------------
+# Dependency check
+# ------------------------------
+install_missing_deps() {
+    local deps=(base-devel git binutils gcc make fakeroot)
+    for dep in "${deps[@]}"; do
+        echo "[*] Checking dependency: $dep"
+    done
+    sudo pacman -S --needed --noconfirm "${deps[@]}"
 }
 
-# Reset ZRAM fresh every run
+# ------------------------------
+# ZRAM setup
+# ------------------------------
 setup_zram() {
-    if [[ -b $ZRAM_DEV ]]; then
-        echo "[*] Resetting existing ZRAM..."
-        sudo swapoff "$ZRAM_DEV" 2>/dev/null || true
-        echo 1 | sudo tee /sys/block/zram0/reset >/dev/null
-    else
+    if [[ ! -b $ZRAM_DEV ]]; then
         echo "[*] Loading zram module..."
         sudo modprobe zram
     fi
 
-    MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-    echo "[*] Initializing zram0 with ${MEM_MB}MB..."
-    echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize >/dev/null
-    sudo mkswap "$ZRAM_DEV"
-    sudo swapon -p 100 "$ZRAM_DEV"
-}
+    local current_size
+    current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
 
-# Mount tmpfs RAM_DIR
-setup_ram_dir() {
-    sudo mkdir -p "$RAM_DIR"
-    if mountpoint -q "$RAM_DIR"; then
-        echo "[*] Cleaning existing RAM_DIR..."
-        sudo umount -l "$RAM_DIR"
-    fi
-    echo "[*] Mounting tmpfs on $RAM_DIR..."
-    sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
-}
-
-# Copy results safely
-safe_copy_results() {
-    local workdir="$1"
-    shopt -s nullglob
-    for f in "$workdir"/*.{pkg.tar.lz4,src.tar.zst}; do
-        cp -v "$f" "$PKG_DST/"
-    done
-}
-
-# Detect source type
-prepare_pkg_src() {
-    if [[ -d "$PKG_SRC" ]]; then
-        SRC_DIR="$PKG_SRC"
-    elif [[ "$PKG_SRC" =~ ^https?:// ]]; then
-        SRC_DIR="$RAM_DIR/$(basename "$PKG_SRC" .tar.*)"
-        mkdir -p "$SRC_DIR"
-        wget -c "$PKG_SRC" -O "$SRC_DIR/source.tar.zst"
-        cd "$SRC_DIR"
-        tar -xf source.tar.zst
+    if [[ "$current_size" -eq 0 ]]; then
+        MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+        echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
+        echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
+        sudo mkswap $ZRAM_DEV
+        sudo swapon -p 100 $ZRAM_DEV
     else
-        SRC_DIR="$RAM_DIR/$PKG_SRC"
-        if [[ ! -d "$SRC_DIR" ]]; then
-            git clone "https://aur.archlinux.org/$PKG_SRC.git" "$SRC_DIR"
-        fi
+        echo "[*] zram0 already active (size: $((current_size/1024/1024))MB), skipping re-init."
     fi
 }
 
-# Build package
-build_package() {
-    local workdir="$RAM_DIR/$(basename "$SRC_DIR")"
-    local logfile="$LOG_DIR/build_$(basename "$SRC_DIR")_$(date '+%Y%m%d_%H%M%S').log"
+cleanup_zram() {
+    if [[ -b $ZRAM_DEV ]]; then
+        echo "[*] Cleaning up ZRAM..."
+        sudo swapoff "$ZRAM_DEV" || true
+        sudo rmmod zram || true
+    fi
+}
 
-    echo "[*] Starting build: $(basename "$SRC_DIR")"
+# ------------------------------
+# RAM tmpfs handling
+# ------------------------------
+mount_tmpfs() {
+    echo "[*] Mounting tmpfs on $CEREBRO_DIR ..."
+    sudo mount -t tmpfs -o size=100% tmpfs "$CEREBRO_DIR"
+    mkdir -p "$CEREBRO_DIR/build"
+}
+
+umount_tmpfs() {
+    echo "[*] Cleaning RAM build dir..."
+    sudo fuser -k "$CEREBRO_DIR" || true
+    sync
+    sudo umount -l "$CEREBRO_DIR" || true
+}
+
+# ------------------------------
+# Build package
+# ------------------------------
+build_package() {
+    local pkg="$1"
+    local ts
+    ts=$(date +"%Y%m%d_%H%M%S")
+    local logfile="$LOG_DIR/build_${pkg}_${ts}.log"
+
     echo "[*] Logging to $logfile"
 
-    rm -rf "$workdir"
-    cp -r "$SRC_DIR" "$workdir"
-    cd "$workdir"
+    echo "[*] Cloning AUR repo: $pkg ..."
+    rm -rf "$CACHE_DIR/aur/$pkg"
+    git clone "https://aur.archlinux.org/${pkg}.git" "$CACHE_DIR/aur/$pkg" &>>"$logfile"
 
-    echo "===== Build $(date '+%F %T') =====" | tee -a "$logfile"
+    cp -r "$CACHE_DIR/aur/$pkg" "$CEREBRO_DIR/build/$pkg"
 
-    if makepkg -sric --noconfirm --clean > >(tee -a "$logfile") 2>&1; then
-        echo "[+] Build & install successful!" | tee -a "$logfile"
-        safe_copy_results "$workdir"
-        echo "[+] Results saved to $PKG_DST/" | tee -a "$logfile"
-    else
-        echo "[!] Build failed, see $logfile" | tee -a "$logfile"
+    cd "$CEREBRO_DIR/build/$pkg"
+    echo "[*] Building $pkg ..."
+    makepkg -sric --noconfirm &>>"$logfile" || {
+        echo "[!] Build failed. Saving copy to $CACHE_DIR/failed/$pkg ..."
+        mkdir -p "$CACHE_DIR/failed"
+        cp -r "$CEREBRO_DIR/build/$pkg" "$CACHE_DIR/failed/${pkg}_${ts}"
         return 1
-    fi
+    }
 }
 
-# Cleanup RAM dir
-cleanup_ram_dir() {
-    if mountpoint -q "$RAM_DIR"; then
-        echo "[*] Cleaning up RAM_DIR..."
-        sudo umount -l "$RAM_DIR" || echo "[!] Could not unmount $RAM_DIR"
+# ------------------------------
+# Main
+# ------------------------------
+main() {
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: $0 <package>"
+        exit 1
     fi
+
+    local pkg="$1"
+
+    install_missing_deps
+    setup_zram
+    mount_tmpfs
+
+    trap 'echo "[!] Aborting..."; umount_tmpfs; cleanup_zram' EXIT
+
+    build_package "$pkg"
+
+    umount_tmpfs
+    cleanup_zram
+
+    echo "[*] Done."
 }
 
-### MAIN ###
-
-setup_zram
-setup_ram_dir
-prepare_pkg_src
-build_package
-cleanup_ram_dir
-
-echo "[*] Build process finished."
+main "$@"
