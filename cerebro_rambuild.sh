@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
-# cbro_build — universal RAM build helper
-# Features:
-# - Build in RAM using tmpfs (/mnt/cerebro_ram_build)
-# - Auto ZRAM using all available RAM
-# - Persistent logs in ~/cerebro/log/
-# - Auto-copy build results to ~/pkgbuilds
-# - Can build local directories, AUR packages, or URLs
+# cerebro_rambuild.sh – Build packages in RAM with ZRAM + tmpfs (auto-mount/unmount)
 
 set -euo pipefail
 
-### CONFIGURATION ###
-CEREBRO_DIR="$HOME/cerebro"
-LOG_DIR="$CEREBRO_DIR/log"
-PKG_DST="$HOME/pkgbuilds"
-RAM_DIR="/mnt/cerebro_ram_build"
+RAMDISK="/mnt/cerebro_ram_build"
+LOGDIR="$HOME/cerebro/log"
+PKGDEST="$HOME/cerebro/pkg"
 ZRAM_DEV="/dev/zram0"
 
-mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DST"
+mkdir -p "$LOGDIR" "$PKGDEST"
 
-### FUNCTIONS ###
-error_exit() {
-    echo "[!] Error: $*" >&2
-    exit 1
-}
-
+# --- Setup ZRAM ---
 setup_zram() {
     if [[ ! -b $ZRAM_DEV ]]; then
         echo "[*] Loading zram module..."
@@ -44,88 +31,66 @@ setup_zram() {
     fi
 }
 
-setup_ram_dir() {
-    if [[ ! -d "$RAM_DIR" ]]; then
-        echo "[*] Creating RAM_DIR: $RAM_DIR"
-        sudo mkdir -p "$RAM_DIR"
-    fi
-
-    if ! mountpoint -q "$RAM_DIR"; then
-        echo "[*] Mounting tmpfs on $RAM_DIR (size = all available RAM)..."
-        sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
-        if ! grep -q "$RAM_DIR" /etc/fstab; then
-            echo "tmpfs $RAM_DIR tmpfs defaults,size=100% 0 0" | sudo tee -a /etc/fstab
-            echo "[*] Added $RAM_DIR to /etc/fstab"
-        fi
-    else
-        echo "[*] $RAM_DIR already mounted"
+# --- Setup RAM disk ---
+mount_ramdisk() {
+    sudo mkdir -p "$RAMDISK"
+    if ! mountpoint -q "$RAMDISK"; then
+        echo "[*] Mounting tmpfs on $RAMDISK"
+        sudo mount -t tmpfs -o size=100% tmpfs "$RAMDISK"
     fi
 }
 
-fetch_pkg_src() {
+unmount_ramdisk() {
+    if mountpoint -q "$RAMDISK"; then
+        echo "[*] Unmounting $RAMDISK"
+        sudo umount "$RAMDISK"
+    fi
+}
+
+# Auto-cleanup on exit
+trap unmount_ramdisk EXIT
+
+# --- Build package ---
+build_pkg() {
     local src="$1"
-    if [[ -d "$src" ]]; then
-        PKG_SRC="$src"
-    elif [[ "$src" =~ ^https?:// ]]; then
-        # URL download into RAM_DIR
-        local filename
-        filename=$(basename "$src")
-        PKG_SRC="$RAM_DIR/$filename"
-        echo "[*] Downloading $src to $PKG_SRC..."
-        curl -L "$src" -o "$PKG_SRC"
-        # Extract if tarball
-        if [[ "$PKG_SRC" =~ \.tar\.(gz|xz|bz2|zst)$ ]]; then
-            mkdir -p "$RAM_DIR/build"
-            tar -xf "$PKG_SRC" -C "$RAM_DIR/build"
-            PKG_SRC=$(find "$RAM_DIR/build" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    local builddir="$RAMDISK/build"
+    rm -rf "$builddir"
+    mkdir -p "$builddir"
+    cd "$builddir"
+
+    if [[ "$src" =~ ^https?:// ]]; then
+        echo "[+] Downloading source from $src"
+        curl -LO "$src"
+        if [[ "$src" =~ \.tar\.(gz|xz|zst)$ ]]; then
+            tar -xf "$(basename "$src")"
+            cd "$(find . -maxdepth 1 -type d | tail -n 1)"
         fi
+    elif [[ -d "$src" ]]; then
+        echo "[+] Copying local source: $src"
+        cp -r "$src"/* .
     else
-        # Assume AUR package
-        PKG_SRC="$RAM_DIR/$src"
-        if [[ ! -d "$PKG_SRC" ]]; then
-            echo "[*] Cloning AUR package $src into $PKG_SRC..."
-            git clone "https://aur.archlinux.org/$src.git" "$PKG_SRC"
-        fi
+        echo "[+] Cloning AUR package: $src"
+        git clone "https://aur.archlinux.org/${src}.git"
+        cd "$src"
     fi
 
-    [[ -d "$PKG_SRC" ]] || error_exit "Package source not found: $PKG_SRC"
-}
-
-build_package() {
-    local pkg_name
-    pkg_name=$(basename "$PKG_SRC")
-    local workdir="$RAM_DIR/$pkg_name-build"
-    local logfile="$LOG_DIR/$pkg_name.log"
-
-    echo "[*] Starting build for: $pkg_name"
-
-    rm -rf "$workdir"
-    mkdir -p "$workdir"
-
-    cp -r "$PKG_SRC"/* "$workdir"
-    cd "$workdir"
-
-    echo "===== Build $(date '+%F %T') =====" | tee -a "$logfile"
-    if makepkg -sric --noconfirm --clean > >(tee -a "$logfile") 2>&1; then
-        echo "[+] Build & install successful!" | tee -a "$logfile"
-
-        shopt -s nullglob
-        for f in ./*.pkg.tar.lz4 ./*.src.tar.zst; do
-            cp -v "$f" "$PKG_DST/" | tee -a "$logfile"
-        done
-        echo "[+] Saved results to $PKG_DST/" | tee -a "$logfile"
+    local log_file="$LOGDIR/$(basename "$src").log"
+    echo "===== Build $(date) =====" | tee "$log_file"
+    if makepkg -sric --noconfirm --log >>"$log_file" 2>&1; then
+        mv ./*.pkg.tar.* "$PKGDEST"/ || true
+        echo "[+] Package built and moved to $PKGDEST"
     else
-        echo "[!] Build failed, see $logfile" | tee -a "$logfile"
-        return 1
+        echo "[!] Build failed, see log: $log_file"
+        exit 1
     fi
 }
 
-### MAIN ###
-if [[ $# -lt 1 ]]; then
-    error_exit "Usage: $0 <package_name|directory|URL>"
+# --- Main ---
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 <pkgname | localdir | url>"
+    exit 1
 fi
 
 setup_zram
-setup_ram_dir
-fetch_pkg_src "$1"
-build_package
+mount_ramdisk
+build_pkg "$1"
