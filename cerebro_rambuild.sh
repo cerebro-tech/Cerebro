@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-#
-# ram_build.sh — build Arch Linux packages entirely in RAM
-# Optimized version with Variant B logging:
-#  - Single log per package in ~/cerebro/log/<pkg>.log
-#  - Appends build date/time inside log
-#  - $RAM_DIR persistent, fast workdir cleanup
-#  - Auto-install + copy results to ~/pkgbuilds
-#  - ZRAM uses all available RAM dynamically
+# cerebro_rumbuild.sh — build packages entirely in RAM
+# Optimized with:
+# - Auto ZRAM using all available RAM
+# - RAM_DIR auto-mount via tmpfs (/mnt/cerebro_ram_build)
+# - Persistent logs in ~/cerebro/log/
+# - Auto-copy build results to ~/pkgbuilds
 
 set -euo pipefail
 
@@ -14,7 +12,7 @@ set -euo pipefail
 CEREBRO_DIR="$HOME/cerebro"
 LOG_DIR="$CEREBRO_DIR/log"
 PKG_DST="$HOME/pkgbuilds"
-RAM_DIR="/mnt/ram_build"
+RAM_DIR="/mnt/cerebro_ram_build"
 ZRAM_DEV="/dev/zram0"
 PKG_SRC="${1:-}"    # first arg = package source (path or AUR dir)
 
@@ -28,7 +26,7 @@ error_exit() {
 
 setup_zram() {
     if [[ ! -b $ZRAM_DEV ]]; then
-        echo "[*] zram0 not found, loading module..."
+        echo "[*] Loading zram module..."
         sudo modprobe zram
     fi
 
@@ -36,7 +34,6 @@ setup_zram() {
     current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
 
     if [[ "$current_size" -eq 0 ]]; then
-        # Use all available RAM for ZRAM
         MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
         echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
         echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
@@ -47,17 +44,32 @@ setup_zram() {
     fi
 }
 
-check_ram_dir() {
+setup_ram_dir() {
     if [[ ! -d "$RAM_DIR" ]]; then
-        error_exit "RAM_DIR ($RAM_DIR) does not exist. Create it and mount tmpfs via /etc/fstab."
+        echo "[*] Creating RAM_DIR: $RAM_DIR"
+        sudo mkdir -p "$RAM_DIR"
     fi
-    if [[ ! -w "$RAM_DIR" ]]; then
-        error_exit "RAM_DIR ($RAM_DIR) is not writable by user $USER."
+
+    # Check if already mounted
+    if ! mountpoint -q "$RAM_DIR"; then
+        echo "[*] Mounting tmpfs on $RAM_DIR (size = all available RAM)..."
+        sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
+        # Optional: add to /etc/fstab for persistent mount
+        if ! grep -q "$RAM_DIR" /etc/fstab; then
+            echo "tmpfs $RAM_DIR tmpfs defaults,size=100% 0 0" | sudo tee -a /etc/fstab
+            echo "[*] Added $RAM_DIR to /etc/fstab"
+        fi
+    else
+        echo "[*] $RAM_DIR already mounted"
     fi
 }
 
-build_package() {
+check_pkg_src() {
     [[ -z "$PKG_SRC" ]] && error_exit "Usage: $0 <package_source>"
+    [[ ! -d "$PKG_SRC" ]] && error_exit "Package source directory not found: $PKG_SRC"
+}
+
+build_package() {
     local pkg_name
     pkg_name=$(basename "$PKG_SRC")
     local workdir="$RAM_DIR/$pkg_name"
@@ -65,7 +77,7 @@ build_package() {
 
     echo "[*] Starting build for: $pkg_name"
 
-    # Fast workdir cleanup (keep dir, remove contents)
+    # Fast cleanup, keep directory
     rm -rf "$workdir"/*
     mkdir -p "$workdir"
 
@@ -76,7 +88,6 @@ build_package() {
     if makepkg -sric --noconfirm --clean > >(tee -a "$logfile") 2>&1; then
         echo "[+] Build & install successful!" | tee -a "$logfile"
 
-        # Copy resulting packages to persistent storage
         shopt -s nullglob
         for f in ./*.pkg.tar.lz4 ./*.src.tar.zst; do
             cp -v "$f" "$PKG_DST/" | tee -a "$logfile"
@@ -90,5 +101,6 @@ build_package() {
 
 ### MAIN ###
 setup_zram
-check_ram_dir
+setup_ram_dir
+check_pkg_src
 build_package
