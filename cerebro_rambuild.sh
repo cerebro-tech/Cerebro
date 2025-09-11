@@ -67,35 +67,6 @@ setup_zram() {
     fi
 }
 
-cleanup_zram() {
-    if [[ -b $ZRAM_DEV ]]; then
-        echo "[*] Cleaning up ZRAM..."
-        sudo swapoff $ZRAM_DEV || true
-        echo 0 | sudo tee /sys/block/zram0/disksize >/dev/null || true
-    fi
-}
-
-mount_ram() {
-    if ! mountpoint -q "$RAM_DIR"; then
-        echo "[*] Mounting tmpfs on $RAM_DIR ..."
-        sudo mkdir -p "$RAM_DIR"
-        sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
-    fi
-}
-
-safe_umount() {
-    if mountpoint -q "$RAM_DIR"; then
-        echo "[*] Cleaning RAM build dir..."
-        cd ~ || true
-        if [[ $KEEP_BUILD -eq 0 ]]; then
-            sudo fuser -k "$RAM_DIR" || true
-            sudo umount "$RAM_DIR" || true
-        else
-            echo "[*] --keep enabled, leaving $RAM_DIR mounted."
-        fi
-    fi
-}
-
 build_pkg() {
     local src="$1"
     [[ -z "$src" ]] && error_exit "Usage: $0 <package_source>"
@@ -170,6 +141,15 @@ build_pkg() {
         echo "[!] Build failed, keeping workdir"
         KEEP_BUILD=1
         return 1
+    fi
+}
+
+cleanup_zram() {
+    if [[ -b $ZRAM_DEV ]]; then
+        echo "[*] Cleaning up ZRAM..."
+        sudo swapoff "$ZRAM_DEV" || true
+        # Remove zram device to fully reset
+        sudo rmmod zram || true
     fi
 }
 
