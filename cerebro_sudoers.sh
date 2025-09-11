@@ -11,11 +11,12 @@ RULES="$USER_NAME ALL=(ALL) NOPASSWD: \
 /usr/bin/mount, /usr/bin/umount, \
 /usr/bin/mkswap, /usr/bin/swapon, /usr/bin/swapoff"
 
-echo "[*] Setting up sudoers rule for user: $USER_NAME"
-echo "$RULES" | sudo tee "$SUDOERS_FILE" > /dev/null
-
-# Secure permissions
-sudo chmod 440 "$SUDOERS_FILE"
-
-echo "[+] Sudoers configured successfully!"
-echo "    User '$USER_NAME' can now run cbro_build without entering a password."
+# Check if already configured
+if sudo test -f "$SUDOERS_FILE" && sudo grep -q "$USER_NAME" "$SUDOERS_FILE"; then
+    echo "[=] Sudoers already configured for '$USER_NAME', skipping."
+else
+    echo "[*] Setting up sudoers rule for user: $USER_NAME"
+    echo "$RULES" | sudo tee "$SUDOERS_FILE" > /dev/null
+    sudo chmod 440 "$SUDOERS_FILE"
+    echo "[+] Sudoers configured successfully!"
+fi
