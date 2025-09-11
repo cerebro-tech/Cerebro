@@ -1,16 +1,40 @@
 #!/usr/bin/env bash
+# cerebro_rambuild.sh - Optimized RAM build script for Arch Linux
+# Usage examples:
+#   cbro_build ~/Downloads/mypkg
+#   cbro_build paru
+#   cbro_build https://example.com/somepkg.tar.zst
+#
+# Aliased as: cbro_build
+
 set -euo pipefail
 
-RAM_DIR="/mnt/cerebro_ram_build"
+# Paths
+RAM_DIR="/mnt/cerebro"
+CACHE_DIR="/var/cache/cerebro"
+BUILD_DIR="$RAM_DIR/build"
 LOG_DIR="$HOME/cerebro/log"
-LOCAL_OUT="$HOME/cerebro/out"
+PKG_DIR="$CACHE_DIR/pkg"
+SRC_DIR="$CACHE_DIR/src"
+
+# Devices
 ZRAM_DEV="/dev/zram0"
 
-mkdir -p "$LOG_DIR" "$LOCAL_OUT"
+# Flags
+KEEP_BUILD=0
 
-# ------------------------------
-# Setup zram swap
-# ------------------------------
+# Functions
+setup_dirs() {
+    sudo mkdir -p "$RAM_DIR" "$CACHE_DIR" "$BUILD_DIR" "$LOG_DIR" "$PKG_DIR" "$SRC_DIR"
+    sudo chown -R "$USER":"$USER" "$CACHE_DIR" "$LOG_DIR"
+
+    # mount tmpfs for RAM builds if not already mounted
+    if ! mountpoint -q "$RAM_DIR"; then
+        echo "[*] Mounting tmpfs on $RAM_DIR ..."
+        sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
+    fi
+}
+
 setup_zram() {
     if [[ ! -b $ZRAM_DEV ]]; then
         echo "[*] Loading zram module..."
@@ -21,78 +45,93 @@ setup_zram() {
     current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
 
     if [[ "$current_size" -eq 0 ]]; then
-        MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+        MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
         echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
         echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
         sudo mkswap $ZRAM_DEV
-        sudo swapon -p 150 $ZRAM_DEV
+        sudo swapon -p 100 $ZRAM_DEV
     else
         echo "[*] zram0 already active (size: $((current_size/1024/1024))MB), skipping re-init."
     fi
 }
 
-# ------------------------------
-# Mount tmpfs for build
-# ------------------------------
-mount_ramdisk() {
-    echo "[*] Mounting tmpfs for build..."
-    sudo mkdir -p "$RAM_DIR"
-    sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
-}
-
-# ------------------------------
-# Cleanup function
-# ------------------------------
-cleanup() {
-    echo "[*] Cleaning up RAM build directory..."
+safe_umount() {
     if mountpoint -q "$RAM_DIR"; then
-        sudo fuser -km "$RAM_DIR" 2>/dev/null || true
-        sudo umount "$RAM_DIR"
+        echo "[*] Cleaning RAM build dir..."
+        if [[ $KEEP_BUILD -eq 0 ]]; then
+            sudo fuser -k "$RAM_DIR" || true
+            sudo umount "$RAM_DIR" || true
+        else
+            echo "[*] --keep enabled, leaving $RAM_DIR mounted."
+        fi
     fi
 }
-trap cleanup EXIT
 
-# ------------------------------
-# Main build function
-# ------------------------------
+trap safe_umount EXIT
+
 build_pkg() {
     local src="$1"
-    local log_file="$LOG_DIR/build.log"
+    local pkgname
+    pkgname=$(basename "$src" .git)
 
-    echo "[*] Starting build: $src"
-    mount_ramdisk
+    local build_log="$LOG_DIR/build_${pkgname}_$(date +'%Y%m%d_%H%M%S').log"
+    echo "[*] Logging to $build_log"
 
-    pushd "$RAM_DIR" >/dev/null
+    if [[ -d "$BUILD_DIR/$pkgname" ]]; then
+        echo "[*] Cleaning old build dir: $BUILD_DIR/$pkgname"
+        rm -rf "$BUILD_DIR/$pkgname"
+    fi
+    mkdir -p "$BUILD_DIR/$pkgname"
+    cd "$BUILD_DIR/$pkgname"
 
-    if [[ -d "$src" ]]; then
-        cp -r "$src"/* "$RAM_DIR"
-        makepkg -scf 2>&1 | tee "$log_file"
+    if [[ -d "$CACHE_DIR/aur/$pkgname/.git" ]]; then
+        echo "[*] Updating cached repo for $pkgname ..."
+        git -C "$CACHE_DIR/aur/$pkgname" pull --ff-only || true
+        cp -r "$CACHE_DIR/aur/$pkgname"/* .
     elif [[ "$src" =~ ^https?:// ]]; then
-        curl -LO "$src"
-        tarball=$(basename "$src")
-        tar -xf "$tarball"
-        cd "$(basename "$tarball" .tar.*)"
-        makepkg -scf 2>&1 | tee "$log_file"
+        echo "[*] Downloading package from $src ..."
+        curl -L "$src" -o "$pkgname.pkg.tar.zst"
+        sudo pacman -U "$pkgname.pkg.tar.zst" --noconfirm |& tee "$build_log"
+        return
+    elif [[ -d "$src" ]]; then
+        echo "[*] Building local directory: $src ..."
+        cp -r "$src"/* .
     else
-        git clone --depth=1 "https://aur.archlinux.org/$src.git"
-        cd "$src"
-        makepkg -scf 2>&1 | tee "$log_file"
+        echo "[*] Cloning AUR repo: $pkgname ..."
+        mkdir -p "$CACHE_DIR/aur"
+        git clone "https://aur.archlinux.org/$pkgname.git" "$CACHE_DIR/aur/$pkgname"
+        cp -r "$CACHE_DIR/aur/$pkgname"/* .
     fi
 
-    echo "[*] Moving build results to $LOCAL_OUT"
-    mv "$RAM_DIR"/*.pkg.tar.* "$LOCAL_OUT" 2>/dev/null || true
+    echo "[*] Running makepkg..."
+    makepkg -s --noconfirm --clean --cleanbuild --log --config /etc/makepkg.conf \
+        PKGDEST="$PKG_DIR" SRCDEST="$SRC_DIR" |& tee "$build_log"
 
-    popd >/dev/null
+    local built_pkg
+    built_pkg=$(find "$PKG_DIR" -type f -name "${pkgname}-*.pkg.tar.*" -print -quit)
+    if [[ -n "$built_pkg" ]]; then
+        echo "[*] Installing package: $built_pkg"
+        sudo pacman -U --noconfirm "$built_pkg" |& tee -a "$build_log"
+    else
+        echo "[!] Build failed, keeping build dir for debugging."
+        KEEP_BUILD=1
+        return 1
+    fi
+
+    echo "[*] Build completed successfully."
 }
 
-# ------------------------------
-# Entry point
-# ------------------------------
-setup_zram
+# Main
+if [[ "${1:-}" == "--keep" ]]; then
+    KEEP_BUILD=1
+    shift
+fi
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <pkg_dir|aur_pkg|url>"
+    echo "Usage: $0 [--keep] <package|path|url>"
     exit 1
 fi
 
+setup_dirs
+setup_zram
 build_pkg "$1"
