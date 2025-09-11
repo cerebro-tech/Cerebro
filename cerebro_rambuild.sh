@@ -60,21 +60,15 @@ prepare_pkg_src() {
         cd "$SRC_DIR"
         tar -xf source.tar.zst
     else
-        if pacman -Si "$PKG_SRC" &>/dev/null; then
-            echo "[*] '$PKG_SRC' is in official repos, using asp..."
-            SRC_DIR="$RAM_DIR/$PKG_SRC"
-            mkdir -p "$SRC_DIR"
-            asp export "$PKG_SRC" -d "$SRC_DIR"
-        else
-            echo "[*] '$PKG_SRC' is in AUR, cloning..."
-            SRC_DIR="$RAM_DIR/$PKG_SRC"
+        SRC_DIR="$RAM_DIR/$PKG_SRC"
+        if [[ ! -d "$SRC_DIR" ]]; then
+            echo "[*] Cloning AUR repo: $PKG_SRC ..."
             if ! git clone "https://aur.archlinux.org/$PKG_SRC.git" "$SRC_DIR"; then
-                error_exit "Package '$PKG_SRC' not found in AUR or repos."
+                error_exit "Package '$PKG_SRC' not found in AUR. If it’s in official repos, install it with pacman instead."
             fi
         fi
     fi
 }
-
 
 build_pkg() {
     cd "$SRC_DIR"
