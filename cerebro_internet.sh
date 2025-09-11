@@ -29,7 +29,7 @@ echo "[*] Detected country: $country, continent: $continent"
 
 # --- 2. Determine reflector countries based on continent ---
 if [[ "$country" == "UA" || "$continent" == "EU" ]]; then
-    countries=("Germany" "France" "Netherlands" "United Kingdom" "Switzerland" "Spain" "Italy")
+    countries=("Ukraine" "Germany" "France" "Netherlands" "United Kingdom" "Switzerland" "Spain" "Italy")
 elif [[ "$continent" == "NA" ]]; then
     countries=("United States" "Canada")
 elif [[ "$continent" == "AS" ]]; then
@@ -39,13 +39,14 @@ else
 fi
 
 # Build reflector command
-reflector_cmd="reflector --protocol https --age 12 --fastest 20 --sort rate --save /etc/pacman.d/mirrorlist"
+reflector_cmd=(reflector --protocol https --age 12 --fastest 20 --sort rate --save /etc/pacman.d/mirrorlist)
 for c in "${countries[@]}"; do
-    reflector_cmd+=" --country $c"
+    reflector_cmd+=(--country "$c")
 done
 
-echo "[*] Running: $reflector_cmd"
-eval "$reflector_cmd"
+echo "[*] Running: ${reflector_cmd[*]}"
+"${reflector_cmd[@]}"
+
 
 # --- 4. Set DNS: Cloudflare primary, Google + Quad9 fallback ---
 echo "[*] Setting DNS..."
