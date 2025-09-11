@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# cerebro_rumbuild.sh — build packages entirely in RAM
-# Optimized with:
+# cbro_build — universal RAM build helper
+# Features:
+# - Build in RAM using tmpfs (/mnt/cerebro_ram_build)
 # - Auto ZRAM using all available RAM
-# - RAM_DIR auto-mount via tmpfs (/mnt/cerebro_ram_build)
 # - Persistent logs in ~/cerebro/log/
 # - Auto-copy build results to ~/pkgbuilds
+# - Can build local directories, AUR packages, or URLs
 
 set -euo pipefail
 
@@ -14,7 +15,6 @@ LOG_DIR="$CEREBRO_DIR/log"
 PKG_DST="$HOME/pkgbuilds"
 RAM_DIR="/mnt/cerebro_ram_build"
 ZRAM_DEV="/dev/zram0"
-PKG_SRC="${1:-}"    # first arg = package source (path or AUR dir)
 
 mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DST"
 
@@ -50,11 +50,9 @@ setup_ram_dir() {
         sudo mkdir -p "$RAM_DIR"
     fi
 
-    # Check if already mounted
     if ! mountpoint -q "$RAM_DIR"; then
         echo "[*] Mounting tmpfs on $RAM_DIR (size = all available RAM)..."
         sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
-        # Optional: add to /etc/fstab for persistent mount
         if ! grep -q "$RAM_DIR" /etc/fstab; then
             echo "tmpfs $RAM_DIR tmpfs defaults,size=100% 0 0" | sudo tee -a /etc/fstab
             echo "[*] Added $RAM_DIR to /etc/fstab"
@@ -64,21 +62,44 @@ setup_ram_dir() {
     fi
 }
 
-check_pkg_src() {
-    [[ -z "$PKG_SRC" ]] && error_exit "Usage: $0 <package_source>"
-    [[ ! -d "$PKG_SRC" ]] && error_exit "Package source directory not found: $PKG_SRC"
+fetch_pkg_src() {
+    local src="$1"
+    if [[ -d "$src" ]]; then
+        PKG_SRC="$src"
+    elif [[ "$src" =~ ^https?:// ]]; then
+        # URL download into RAM_DIR
+        local filename
+        filename=$(basename "$src")
+        PKG_SRC="$RAM_DIR/$filename"
+        echo "[*] Downloading $src to $PKG_SRC..."
+        curl -L "$src" -o "$PKG_SRC"
+        # Extract if tarball
+        if [[ "$PKG_SRC" =~ \.tar\.(gz|xz|bz2|zst)$ ]]; then
+            mkdir -p "$RAM_DIR/build"
+            tar -xf "$PKG_SRC" -C "$RAM_DIR/build"
+            PKG_SRC=$(find "$RAM_DIR/build" -mindepth 1 -maxdepth 1 -type d | head -n1)
+        fi
+    else
+        # Assume AUR package
+        PKG_SRC="$RAM_DIR/$src"
+        if [[ ! -d "$PKG_SRC" ]]; then
+            echo "[*] Cloning AUR package $src into $PKG_SRC..."
+            git clone "https://aur.archlinux.org/$src.git" "$PKG_SRC"
+        fi
+    fi
+
+    [[ -d "$PKG_SRC" ]] || error_exit "Package source not found: $PKG_SRC"
 }
 
 build_package() {
     local pkg_name
     pkg_name=$(basename "$PKG_SRC")
-    local workdir="$RAM_DIR/$pkg_name"
+    local workdir="$RAM_DIR/$pkg_name-build"
     local logfile="$LOG_DIR/$pkg_name.log"
 
     echo "[*] Starting build for: $pkg_name"
 
-    # Fast cleanup, keep directory
-    rm -rf "$workdir"/*
+    rm -rf "$workdir"
     mkdir -p "$workdir"
 
     cp -r "$PKG_SRC"/* "$workdir"
@@ -100,7 +121,11 @@ build_package() {
 }
 
 ### MAIN ###
+if [[ $# -lt 1 ]]; then
+    error_exit "Usage: $0 <package_name|directory|URL>"
+fi
+
 setup_zram
 setup_ram_dir
-check_pkg_src
+fetch_pkg_src "$1"
 build_package
