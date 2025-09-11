@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# cerebro_rambuild.sh – Build packages in RAM with ZRAM + tmpfs (auto-mount/unmount)
-
 set -euo pipefail
 
-RAMDISK="/mnt/cerebro_ram_build"
-LOGDIR="$HOME/cerebro/log"
-PKGDEST="$HOME/cerebro/pkg"
+RAM_DIR="/mnt/cerebro_ram_build"
+LOG_DIR="$HOME/cerebro/log"
+LOCAL_OUT="$HOME/cerebro/out"
 ZRAM_DEV="/dev/zram0"
 
-mkdir -p "$LOGDIR" "$PKGDEST"
+mkdir -p "$LOG_DIR" "$LOCAL_OUT"
 
-# --- Setup ZRAM ---
+# ------------------------------
+# Setup zram swap
+# ------------------------------
 setup_zram() {
     if [[ ! -b $ZRAM_DEV ]]; then
         echo "[*] Loading zram module..."
@@ -25,72 +25,74 @@ setup_zram() {
         echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
         echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
         sudo mkswap $ZRAM_DEV
-        sudo swapon -p 100 $ZRAM_DEV
+        sudo swapon -p 150 $ZRAM_DEV
     else
         echo "[*] zram0 already active (size: $((current_size/1024/1024))MB), skipping re-init."
     fi
 }
 
-# --- Setup RAM disk ---
+# ------------------------------
+# Mount tmpfs for build
+# ------------------------------
 mount_ramdisk() {
-    sudo mkdir -p "$RAMDISK"
-    if ! mountpoint -q "$RAMDISK"; then
-        echo "[*] Mounting tmpfs on $RAMDISK"
-        sudo mount -t tmpfs -o size=100% tmpfs "$RAMDISK"
-    fi
+    echo "[*] Mounting tmpfs for build..."
+    sudo mkdir -p "$RAM_DIR"
+    sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
 }
 
-unmount_ramdisk() {
-    if mountpoint -q "$RAMDISK"; then
-        echo "[*] Unmounting $RAMDISK"
-        sudo umount "$RAMDISK"
+# ------------------------------
+# Cleanup function
+# ------------------------------
+cleanup() {
+    echo "[*] Cleaning up RAM build directory..."
+    if mountpoint -q "$RAM_DIR"; then
+        sudo fuser -km "$RAM_DIR" 2>/dev/null || true
+        sudo umount "$RAM_DIR"
     fi
 }
+trap cleanup EXIT
 
-# Auto-cleanup on exit
-trap unmount_ramdisk EXIT
-
-# --- Build package ---
+# ------------------------------
+# Main build function
+# ------------------------------
 build_pkg() {
     local src="$1"
-    local builddir="$RAMDISK/build"
-    rm -rf "$builddir"
-    mkdir -p "$builddir"
-    cd "$builddir"
+    local log_file="$LOG_DIR/build.log"
 
-    if [[ "$src" =~ ^https?:// ]]; then
-        echo "[+] Downloading source from $src"
+    echo "[*] Starting build: $src"
+    mount_ramdisk
+
+    pushd "$RAM_DIR" >/dev/null
+
+    if [[ -d "$src" ]]; then
+        cp -r "$src"/* "$RAM_DIR"
+        makepkg -scf 2>&1 | tee "$log_file"
+    elif [[ "$src" =~ ^https?:// ]]; then
         curl -LO "$src"
-        if [[ "$src" =~ \.tar\.(gz|xz|zst)$ ]]; then
-            tar -xf "$(basename "$src")"
-            cd "$(find . -maxdepth 1 -type d | tail -n 1)"
-        fi
-    elif [[ -d "$src" ]]; then
-        echo "[+] Copying local source: $src"
-        cp -r "$src"/* .
+        tarball=$(basename "$src")
+        tar -xf "$tarball"
+        cd "$(basename "$tarball" .tar.*)"
+        makepkg -scf 2>&1 | tee "$log_file"
     else
-        echo "[+] Cloning AUR package: $src"
-        git clone "https://aur.archlinux.org/${src}.git"
+        git clone --depth=1 "https://aur.archlinux.org/$src.git"
         cd "$src"
+        makepkg -scf 2>&1 | tee "$log_file"
     fi
 
-    local log_file="$LOGDIR/$(basename "$src").log"
-    echo "===== Build $(date) =====" | tee "$log_file"
-    if makepkg -sric --noconfirm --log >>"$log_file" 2>&1; then
-        mv ./*.pkg.tar.* "$PKGDEST"/ || true
-        echo "[+] Package built and moved to $PKGDEST"
-    else
-        echo "[!] Build failed, see log: $log_file"
-        exit 1
-    fi
+    echo "[*] Moving build results to $LOCAL_OUT"
+    mv "$RAM_DIR"/*.pkg.tar.* "$LOCAL_OUT" 2>/dev/null || true
+
+    popd >/dev/null
 }
 
-# --- Main ---
-if [[ $# -eq 0 ]]; then
-    echo "Usage: $0 <pkgname | localdir | url>"
+# ------------------------------
+# Entry point
+# ------------------------------
+setup_zram
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <pkg_dir|aur_pkg|url>"
     exit 1
 fi
 
-setup_zram
-mount_ramdisk
 build_pkg "$1"
