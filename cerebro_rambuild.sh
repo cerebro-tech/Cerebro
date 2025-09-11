@@ -154,7 +154,6 @@ cleanup_zram() {
 }
 
 ### MAIN ###
-trap 'safe_umount; cleanup_zram' EXIT
 setup_zram
-mount_ram
 build_pkg "$PKG_SRC"
+cleanup_zram
