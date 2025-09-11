@@ -1,143 +1,141 @@
 #!/usr/bin/env bash
-#
-# Cerebro RAM Build Script (cbro)
-# Optimized temporary RAM builds with ZRAM and tmpfs
-#
+# cerebro_rambuild.sh — universal package builder in RAM
+# Features:
+# - Auto tmpfs mount/unmount (/mnt/cerebro)
+# - Auto ZRAM (all available RAM)
+# - Handles AUR, local PKGBUILDs, repo packages, URLs
+# - Persistent logs ~/cerebro/log/
+# - Cache in /var/cache/cerebro
+# - Results stored in ~/pkgbuilds
 
 set -euo pipefail
 
-# ===========================
-# Config
-# ===========================
-CBRO_MNT="/mnt/cerebro"
-CBRO_CACHE="/var/cache/cerebro"
-CBRO_LOG_DIR="$HOME/cerebro/log"
+### CONFIG ###
+CEREBRO_DIR="$HOME/cerebro"
+LOG_DIR="$CEREBRO_DIR/log"
+PKG_DIR="$HOME/pkgbuilds"
+RAM_DIR="/mnt/cerebro"
+CACHE_DIR="/var/cache/cerebro"
+SRC_DIR="$CACHE_DIR/src"
+AUR_CACHE="$CACHE_DIR/aur"
 ZRAM_DEV="/dev/zram0"
+KEEP_BUILD=0
 
-# ===========================
-# Helper functions
-# ===========================
-timestamp() {
-    date +"%Y%m%d_%H%M%S"
-}
+PKG_SRC="${1:-}"
 
-log_msg() {
-    echo "[*] $*"
-}
+mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DIR" "$SRC_DIR" "$AUR_CACHE"
 
-install_missing_deps() {
-    local deps=("$@")
-    for dep in "${deps[@]}"; do
-        if ! pacman -Qi "$dep" &>/dev/null; then
-            log_msg "Installing missing dependency: $dep"
-            sudo pacman -S --needed --noconfirm "$dep"
-        else
-            log_msg "Dependency $dep already installed, skipping."
-        fi
-    done
+### FUNCTIONS ###
+error_exit() {
+    echo "[!] $*" >&2
+    exit 1
 }
 
 setup_zram() {
     if [[ ! -b $ZRAM_DEV ]]; then
-        log_msg "Loading zram module..."
+        echo "[*] Loading zram module..."
         sudo modprobe zram
     fi
-
     local current_size
     current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
-
     if [[ "$current_size" -eq 0 ]]; then
         MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-        log_msg "Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
-        echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
+        echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
+        echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize >/dev/null
         sudo mkswap $ZRAM_DEV
         sudo swapon -p 100 $ZRAM_DEV
     else
-        log_msg "zram0 already active (size: $((current_size/1024/1024))MB), skipping re-init."
+        echo "[*] zram0 already active (size: $((current_size/1024/1024))MB)"
     fi
 }
 
-cleanup_zram() {
-    if [[ -b $ZRAM_DEV ]]; then
-        log_msg "Cleaning up ZRAM..."
-        sudo swapoff "$ZRAM_DEV" || true
-        sudo rmmod zram || true
+mount_ram() {
+    if ! mountpoint -q "$RAM_DIR"; then
+        echo "[*] Mounting tmpfs on $RAM_DIR ..."
+        sudo mkdir -p "$RAM_DIR"
+        sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
     fi
 }
 
 safe_umount() {
-    local target="$1"
-    if mountpoint -q "$target"; then
-        log_msg "Unmounting $target..."
-        sync
-        sudo fuser -k "$target" || true
-        sudo umount -l "$target" || true
+    if mountpoint -q "$RAM_DIR"; then
+        echo "[*] Cleaning RAM build dir..."
+        cd ~ || true
+        if [[ $KEEP_BUILD -eq 0 ]]; then
+            sudo fuser -k "$RAM_DIR" || true
+            sudo umount "$RAM_DIR" || true
+        else
+            echo "[*] --keep enabled, leaving $RAM_DIR mounted."
+        fi
     fi
 }
 
-# ===========================
-# Main build
-# ===========================
-main() {
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: cbro <pkgname>"
-        exit 1
+build_pkg() {
+    local src="$1"
+    [[ -z "$src" ]] && error_exit "Usage: $0 <package_source>"
+
+    local pkgname
+    pkgname=$(basename "$src" .git)
+    local workdir="$RAM_DIR/$pkgname"
+    local logfile="$LOG_DIR/build_${pkgname}_$(date +'%Y%m%d_%H%M%S').log"
+    echo "[*] Logging to $logfile"
+
+    # 1. Official repo
+    if pacman -Si "$pkgname" &>/dev/null; then
+        echo "[*] $pkgname is in official repos, installing..."
+        sudo pacman -S --noconfirm "$pkgname" |& tee "$logfile"
+        return
     fi
 
-    local pkgname="$1"
-    local log_file="$CBRO_LOG_DIR/build_${pkgname}_$(timestamp).log"
+    # 2. Reset build dir
+    rm -rf "$workdir"
+    mkdir -p "$workdir"
+    cd "$workdir"
 
-    mkdir -p "$CBRO_LOG_DIR"
-
-    log_msg "Mounting tmpfs on $CBRO_MNT ..."
-    sudo mkdir -p "$CBRO_MNT"
-    sudo mount -t tmpfs -o size=100% tmpfs "$CBRO_MNT"
-
-    log_msg "Setting up ZRAM..."
-    setup_zram
-
-    log_msg "Ensuring build cache exists..."
-    sudo mkdir -p "$CBRO_CACHE/aur"
-
-    log_msg "Logging to $log_file"
-
-    # Install dependencies (skip if already installed)
-    install_missing_deps base-devel git rust
-
-    # Clone AUR package
-    local aur_dir="$CBRO_CACHE/aur/$pkgname"
-    if [[ ! -d "$aur_dir/.git" ]]; then
-        log_msg "Cloning AUR repo: $pkgname ..."
-        git clone "https://aur.archlinux.org/${pkgname}.git" "$aur_dir" >>"$log_file" 2>&1 || {
-            echo "[ERROR] Failed to clone AUR package $pkgname" | tee -a "$log_file"
-            safe_umount "$CBRO_MNT"
-            cleanup_zram
-            exit 1
-        }
+    # 3. Handle source
+    if [[ -d "$src/.git" ]]; then
+        echo "[*] Using local git repo: $src"
+        cp -r "$src"/* .
+    elif [[ -d "$src" ]]; then
+        echo "[*] Using local directory: $src"
+        cp -r "$src"/* .
+    elif [[ "$src" =~ ^https?:// ]]; then
+        echo "[*] Downloading from $src ..."
+        curl -L "$src" -o "$pkgname.pkg.tar.zst"
+        sudo pacman -U "$pkgname.pkg.tar.zst" --noconfirm |& tee "$logfile"
+        return
     else
-        log_msg "Updating existing AUR repo: $pkgname ..."
-        (cd "$aur_dir" && git pull) >>"$log_file" 2>&1 || true
+        # AUR
+        if [[ -d "$AUR_CACHE/$pkgname/.git" ]]; then
+            echo "[*] Updating cached AUR repo: $pkgname"
+            git -C "$AUR_CACHE/$pkgname" pull --ff-only || true
+        else
+            echo "[*] Cloning AUR repo: $pkgname"
+            git clone "https://aur.archlinux.org/$pkgname.git" "$AUR_CACHE/$pkgname"
+        fi
+        cp -r "$AUR_CACHE/$pkgname"/* .
     fi
 
-    # Copy to RAM build dir
-    cp -r "$aur_dir" "$CBRO_MNT/$pkgname"
-
-    # Build
-    pushd "$CBRO_MNT/$pkgname" >/dev/null
-    log_msg "Building package $pkgname ..."
-    makepkg -sric --noconfirm >>"$log_file" 2>&1
-    popd >/dev/null
-
-    log_msg "Build complete: $pkgname"
-
-    # Cleanup
-    log_msg "Cleaning RAM build dir..."
-    rm -rf "$CBRO_MNT/$pkgname"
-
-    safe_umount "$CBRO_MNT"
-    cleanup_zram
-
-    log_msg "Done."
+    # 4. Build
+    echo "[*] Building $pkgname ..."
+    if makepkg -s --noconfirm --clean --cleanbuild --log \
+        --config /etc/makepkg.conf \
+        PKGDEST="$PKG_DIR" SRCDEST="$SRC_DIR" |& tee "$logfile"; then
+        local built_pkg
+        built_pkg=$(find "$PKG_DIR" -type f -name "${pkgname}-*.pkg.tar.*" -print -quit)
+        if [[ -n "$built_pkg" ]]; then
+            echo "[*] Installing $built_pkg"
+            sudo pacman -U --noconfirm "$built_pkg" |& tee -a "$logfile"
+        fi
+    else
+        echo "[!] Build failed, keeping workdir"
+        KEEP_BUILD=1
+        return 1
+    fi
 }
 
-main "$@"
+### MAIN ###
+trap safe_umount EXIT
+setup_zram
+mount_ram
+build_pkg "$PKG_SRC"
