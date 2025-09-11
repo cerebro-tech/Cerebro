@@ -1,63 +1,94 @@
 #!/usr/bin/env bash
-# ~/cerebro_scripts/ram_build.sh
-# RAM-based package build with mold, ninja, and smart ccache
+#
+# ram_build.sh — build Arch Linux packages entirely in RAM
+# Optimized version with Variant B logging:
+#  - Single log per package in ~/cerebro/log/<pkg>.log
+#  - Appends build date/time inside log
+#  - $RAM_DIR persistent, fast workdir cleanup
+#  - Auto-install + copy results to ~/pkgbuilds
+#  - ZRAM uses all available RAM dynamically
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-LOG_FILE="$SCRIPT_DIR/ram_build.log"
+set -euo pipefail
 
-echo "[*] Starting RAM build: $(date)" | tee -a "$LOG_FILE"
+### CONFIGURATION ###
+CEREBRO_DIR="$HOME/cerebro"
+LOG_DIR="$CEREBRO_DIR/log"
+PKG_DST="$HOME/pkgbuilds"
+RAM_DIR="/mnt/ram_build"
+ZRAM_DEV="/dev/zram0"
+PKG_SRC="${1:-}"    # first arg = package source (path or AUR dir)
 
-# Auto-detect RAM in MB
-MEM_MB=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
-RAM_BUILD=$(( MEM_MB / 2 )) # Use half of RAM
-(( RAM_BUILD < 512 )) && RAM_BUILD=512
+mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DST"
 
-echo "[*] Using $RAM_BUILD MB tmpfs for build" | tee -a "$LOG_FILE"
-
-# Mount tmpfs
-BUILD_TMP=$(mktemp -d)
-sudo mount -t tmpfs -o size=${RAM_BUILD}M tmpfs "$BUILD_TMP"
-
-# Detect source folder
-SRC_DIR="${1:-$PWD}"
-if [ ! -d "$SRC_DIR" ]; then
-    echo "[!] Source folder $SRC_DIR does not exist!" | tee -a "$LOG_FILE"
+### FUNCTIONS ###
+error_exit() {
+    echo "[!] Error: $*" >&2
     exit 1
-fi
+}
 
-# Detect CMake generator
-CMAKE_GEN=""
-command -v ninja >/dev/null 2>&1 && CMAKE_GEN="-G Ninja"
+setup_zram() {
+    if [[ ! -b $ZRAM_DEV ]]; then
+        echo "[*] zram0 not found, loading module..."
+        sudo modprobe zram
+    fi
 
-# Setup ccache and mold
-export CCACHE_DIR="$HOME/.ccache"
-export USE_CCACHE=1
-export CCACHE_MAXSIZE=10G
-export CCACHE_COMPILERCHECK=content
-export LD=ld.mold
+    local current_size
+    current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
 
-# Check for previous build cache
-CACHE_DIR="$SRC_DIR/build_cache"
-mkdir -p "$CACHE_DIR"
+    if [[ "$current_size" -eq 0 ]]; then
+        # Use all available RAM for ZRAM
+        MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+        echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
+        echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize > /dev/null
+        sudo mkswap $ZRAM_DEV
+        sudo swapon -p 100 $ZRAM_DEV
+    else
+        echo "[*] zram0 already active (size: $((current_size/1024/1024))MB), skipping re-init."
+    fi
+}
 
-echo "[*] Starting build from $SRC_DIR in $BUILD_TMP" | tee -a "$LOG_FILE"
-cd "$BUILD_TMP" || exit 1
+check_ram_dir() {
+    if [[ ! -d "$RAM_DIR" ]]; then
+        error_exit "RAM_DIR ($RAM_DIR) does not exist. Create it and mount tmpfs via /etc/fstab."
+    fi
+    if [[ ! -w "$RAM_DIR" ]]; then
+        error_exit "RAM_DIR ($RAM_DIR) is not writable by user $USER."
+    fi
+}
 
-# Use persistent cache
-cmake $CMAKE_GEN "$SRC_DIR" -B . -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-      -DCMAKE_LINKER=ld.mold
+build_package() {
+    [[ -z "$PKG_SRC" ]] && error_exit "Usage: $0 <package_source>"
+    local pkg_name
+    pkg_name=$(basename "$PKG_SRC")
+    local workdir="$RAM_DIR/$pkg_name"
+    local logfile="$LOG_DIR/$pkg_name.log"
 
-# Build with parallelization and logging
-cmake --build . --parallel "$(nproc)" | tee -a "$LOG_FILE"
+    echo "[*] Starting build for: $pkg_name"
 
-# Copy compiled objects back to persistent cache
-rsync -a --progress "$BUILD_TMP/" "$CACHE_DIR/"
+    # Fast workdir cleanup (keep dir, remove contents)
+    rm -rf "$workdir"/*
+    mkdir -p "$workdir"
 
-echo "[*] Build finished, cleaning tmpfs" | tee -a "$LOG_FILE"
-cd "$HOME"
-sudo umount "$BUILD_TMP"
-rm -rf "$BUILD_TMP"
+    cp -r "$PKG_SRC"/* "$workdir"
+    cd "$workdir"
 
-echo "[*] Done: $(date)" | tee -a "$LOG_FILE"
+    echo "===== Build $(date '+%F %T') =====" | tee -a "$logfile"
+    if makepkg -sric --noconfirm --clean > >(tee -a "$logfile") 2>&1; then
+        echo "[+] Build & install successful!" | tee -a "$logfile"
+
+        # Copy resulting packages to persistent storage
+        shopt -s nullglob
+        for f in ./*.pkg.tar.lz4 ./*.src.tar.zst; do
+            cp -v "$f" "$PKG_DST/" | tee -a "$logfile"
+        done
+        echo "[+] Saved results to $PKG_DST/" | tee -a "$logfile"
+    else
+        echo "[!] Build failed, see $logfile" | tee -a "$logfile"
+        return 1
+    fi
+}
+
+### MAIN ###
+setup_zram
+check_ram_dir
+build_package
