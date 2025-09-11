@@ -1,159 +1,129 @@
 #!/usr/bin/env bash
-# cerebro_rambuild.sh — universal RAM package builder with auto-dependencies
+# cbro — universal RAM build script (optimized)
+#
+# Requirements (install manually if missing):
+#   base-devel git wget zram kernel module
+#
 # Features:
-# - Auto tmpfs mount/unmount (/mnt/cerebro)
-# - Auto ZRAM (all available RAM) and cleanup after build
-# - Automatic installation of missing dependencies
-# - Handles AUR, local PKGBUILDs, repo packages, URLs
-# - Persistent logs ~/cerebro/log/
-# - Cache in /var/cache/cerebro
-# - Results stored in ~/pkgbuilds
-# - Optional --keep to preserve build dir
+# - Always fresh tmpfs build dir (/mnt/cerebro)
+# - Always reset ZRAM each run
+# - Persistent logs in ~/cerebro/log/
+# - Copy results to ~/pkgbuilds/
+# - Works with local dir, AUR package, or URL
 
 set -euo pipefail
 
-### CONFIG ###
+### CONFIGURATION ###
 CEREBRO_DIR="$HOME/cerebro"
 LOG_DIR="$CEREBRO_DIR/log"
-PKG_DIR="$HOME/pkgbuilds"
+PKG_DST="$HOME/pkgbuilds"
 RAM_DIR="/mnt/cerebro"
-CACHE_DIR="/var/cache/cerebro"
-SRC_DIR="$CACHE_DIR/src"
-AUR_CACHE="$CACHE_DIR/aur"
 ZRAM_DEV="/dev/zram0"
-KEEP_BUILD=0
+PKG_SRC="${1:-}"    # local path, AUR package name, or URL
 
-# Parse --keep
-if [[ "${@: -1}" == "--keep" ]]; then
-    KEEP_BUILD=1
-    PKG_SRC="${@:1:$#-1}"
-else
-    PKG_SRC="${1:-}"
-fi
-
-mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DIR" "$SRC_DIR" "$AUR_CACHE"
+mkdir -p "$CEREBRO_DIR" "$LOG_DIR" "$PKG_DST"
 
 ### FUNCTIONS ###
+
 error_exit() {
-    echo "[!] $*" >&2
+    echo "[!] Error: $*" >&2
     exit 1
 }
 
-install_missing_deps() {
-    local deps=("$@")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &>/dev/null; then
-            echo "[*] Installing missing dependency: $dep"
-            sudo pacman -S --needed --noconfirm "$dep"
-        fi
-    done
-}
-
+# Reset ZRAM fresh every run
 setup_zram() {
-    if [[ ! -b $ZRAM_DEV ]]; then
+    if [[ -b $ZRAM_DEV ]]; then
+        echo "[*] Resetting existing ZRAM..."
+        sudo swapoff "$ZRAM_DEV" 2>/dev/null || true
+        echo 1 | sudo tee /sys/block/zram0/reset >/dev/null
+    else
         echo "[*] Loading zram module..."
         sudo modprobe zram
     fi
-    local current_size
-    current_size=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
-    if [[ "$current_size" -eq 0 ]]; then
-        MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-        echo "[*] Initializing zram0 with ${MEM_MB}MB (all available RAM)..."
-        echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize >/dev/null
-        sudo mkswap $ZRAM_DEV
-        sudo swapon -p 200 $ZRAM_DEV
+
+    MEM_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+    echo "[*] Initializing zram0 with ${MEM_MB}MB..."
+    echo "$((MEM_MB*1024*1024))" | sudo tee /sys/block/zram0/disksize >/dev/null
+    sudo mkswap "$ZRAM_DEV"
+    sudo swapon -p 100 "$ZRAM_DEV"
+}
+
+# Mount tmpfs RAM_DIR
+setup_ram_dir() {
+    sudo mkdir -p "$RAM_DIR"
+    if mountpoint -q "$RAM_DIR"; then
+        echo "[*] Cleaning existing RAM_DIR..."
+        sudo umount -l "$RAM_DIR"
+    fi
+    echo "[*] Mounting tmpfs on $RAM_DIR..."
+    sudo mount -t tmpfs -o size=100% tmpfs "$RAM_DIR"
+}
+
+# Copy results safely
+safe_copy_results() {
+    local workdir="$1"
+    shopt -s nullglob
+    for f in "$workdir"/*.{pkg.tar.lz4,src.tar.zst}; do
+        cp -v "$f" "$PKG_DST/"
+    done
+}
+
+# Detect source type
+prepare_pkg_src() {
+    if [[ -d "$PKG_SRC" ]]; then
+        SRC_DIR="$PKG_SRC"
+    elif [[ "$PKG_SRC" =~ ^https?:// ]]; then
+        SRC_DIR="$RAM_DIR/$(basename "$PKG_SRC" .tar.*)"
+        mkdir -p "$SRC_DIR"
+        wget -c "$PKG_SRC" -O "$SRC_DIR/source.tar.zst"
+        cd "$SRC_DIR"
+        tar -xf source.tar.zst
     else
-        echo "[*] zram0 already active (size: $((current_size/1024/1024))MB)"
+        SRC_DIR="$RAM_DIR/$PKG_SRC"
+        if [[ ! -d "$SRC_DIR" ]]; then
+            git clone "https://aur.archlinux.org/$PKG_SRC.git" "$SRC_DIR"
+        fi
     fi
 }
 
-build_pkg() {
-    local src="$1"
-    [[ -z "$src" ]] && error_exit "Usage: $0 <package_source>"
+# Build package
+build_package() {
+    local workdir="$RAM_DIR/$(basename "$SRC_DIR")"
+    local logfile="$LOG_DIR/build_$(basename "$SRC_DIR")_$(date '+%Y%m%d_%H%M%S').log"
 
-    local pkgname
-    pkgname=$(basename "$src" .git)
-    local workdir="$RAM_DIR/$pkgname"
-    local logfile="$LOG_DIR/build_${pkgname}_$(date +'%Y%m%d_%H%M%S').log"
+    echo "[*] Starting build: $(basename "$SRC_DIR")"
     echo "[*] Logging to $logfile"
 
-    # 1. Install core build tools if missing
-    install_missing_deps git base-devel curl wget pkgconf openssl rust cargo
-
-    # 2. Official repo
-    if pacman -Si "$pkgname" &>/dev/null; then
-        echo "[*] $pkgname is in official repos, installing..."
-        sudo pacman -S --needed --noconfirm "$pkgname" |& tee "$logfile"
-        return
-    fi
-
-    # 3. Reset build dir
     rm -rf "$workdir"
-    mkdir -p "$workdir"
+    cp -r "$SRC_DIR" "$workdir"
     cd "$workdir"
 
-    # 4. Handle source
-    if [[ -d "$src/.git" ]]; then
-        echo "[*] Using local git repo: $src"
-        cp -r "$src"/* .
-    elif [[ -d "$src" ]]; then
-        echo "[*] Using local directory: $src"
-        cp -r "$src"/* .
-    elif [[ "$src" =~ ^https?:// ]]; then
-        echo "[*] Downloading from $src ..."
-        curl -L "$src" -o "$pkgname.pkg.tar.zst"
-        sudo pacman -U --needed --noconfirm "$pkgname.pkg.tar.zst" |& tee "$logfile"
-        return
-    else
-        # AUR
-        if [[ -d "$AUR_CACHE/$pkgname/.git" ]]; then
-            echo "[*] Updating cached AUR repo: $pkgname"
-            git -C "$AUR_CACHE/$pkgname" pull --ff-only || true
-        else
-            echo "[*] Cloning AUR repo: $pkgname"
-            git clone "https://aur.archlinux.org/$pkgname.git" "$AUR_CACHE/$pkgname"
-        fi
-        cp -r "$AUR_CACHE/$pkgname"/* .
-    fi
+    echo "===== Build $(date '+%F %T') =====" | tee -a "$logfile"
 
-    # 5. OpenSSL for Rust
-    if command -v cargo &>/dev/null; then
-        if pkg-config --exists openssl; then
-            export OPENSSL_DIR=$(pkg-config --variable=prefix openssl)
-            echo "[*] OPENSSL_DIR set to $OPENSSL_DIR for Rust builds"
-        else
-            echo "[!] OpenSSL not found via pkg-config, using default /usr"
-            export OPENSSL_DIR="/usr"
-        fi
-    fi
-
-    # 6. Build
-    echo "[*] Building $pkgname ..."
-    if makepkg -s --noconfirm --clean --cleanbuild \
-        PKGDEST="$PKG_DIR" SRCDEST="$SRC_DIR" |& tee "$logfile"; then
-        local built_pkg
-        built_pkg=$(find "$PKG_DIR" -type f -name "${pkgname}-*.pkg.tar.*" -print -quit)
-        if [[ -n "$built_pkg" ]]; then
-            echo "[*] Installing $built_pkg"
-            sudo pacman -U --noconfirm "$built_pkg" |& tee -a "$logfile"
-        fi
+    if makepkg -sric --noconfirm --clean > >(tee -a "$logfile") 2>&1; then
+        echo "[+] Build & install successful!" | tee -a "$logfile"
+        safe_copy_results "$workdir"
+        echo "[+] Results saved to $PKG_DST/" | tee -a "$logfile"
     else
-        echo "[!] Build failed, keeping workdir"
-        KEEP_BUILD=1
+        echo "[!] Build failed, see $logfile" | tee -a "$logfile"
         return 1
     fi
 }
 
-cleanup_zram() {
-    if [[ -b $ZRAM_DEV ]]; then
-        echo "[*] Cleaning up ZRAM..."
-        sudo swapoff "$ZRAM_DEV" || true
-        # Remove zram device to fully reset
-        sudo rmmod zram || true
+# Cleanup RAM dir
+cleanup_ram_dir() {
+    if mountpoint -q "$RAM_DIR"; then
+        echo "[*] Cleaning up RAM_DIR..."
+        sudo umount -l "$RAM_DIR" || echo "[!] Could not unmount $RAM_DIR"
     fi
 }
 
 ### MAIN ###
+
 setup_zram
-build_pkg "$PKG_SRC"
-cleanup_zram
+setup_ram_dir
+prepare_pkg_src
+build_package
+cleanup_ram_dir
+
+echo "[*] Build process finished."
