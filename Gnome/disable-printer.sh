@@ -1,5 +1,4 @@
 #!/bin/bash
-# disable-gnome-print-plugins.sh
 # Safely disable GNOME printing plugins by renaming their binaries.
 # Run with no arguments to disable.
 # Run with --restore to restore original binaries.
