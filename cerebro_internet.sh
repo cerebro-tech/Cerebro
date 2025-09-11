@@ -12,10 +12,11 @@ echo "[*] Starting Cerebro Internet Optimization..."
 # --- 0. Ensure required packages ---
 echo "[*] Installing required packages..."
 for pkg in reflector ethtool irqbalance curl; do
-  if ! pacman -Qq | grep -qw "$pkg"; then
-    pacman -S -needed --noconfirm "$pkg"
+  if ! pacman -Qi "$pkg" &>/dev/null; then
+    pacman -S --noconfirm "$pkg"
   fi
 done
+
 
 # Enable and start irqbalance
 systemctl enable --now irqbalance
