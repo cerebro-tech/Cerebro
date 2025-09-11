@@ -49,17 +49,19 @@ echo "[*] Running: ${reflector_cmd[*]}"
 
 
 # --- 4. Set DNS: Cloudflare primary, Google + Quad9 fallback ---
-echo "[*] Setting DNS..."
-dns_servers=("1.1.1.1" "1.0.0.1" "8.8.8.8" "8.8.4.4" "9.9.9.9")
-if command -v resolvectl >/dev/null 2>&1; then
-  for iface in $(ip -o link show | awk -F': ' '{print $2}'); do
-    resolvectl dns "$iface" "${dns_servers[@]}"
-  done
-  resolvectl flush-caches
+dns_servers=("1.1.1.1" "1.0.0.1" "9.9.9.9" "8.8.8.8" "8.8.4.4")
+if systemctl is-active --quiet systemd-resolved; then
+    echo "[*] systemd-resolved active, setting DNS via resolvectl..."
+    for iface in $(ip -o link show | awk -F': ' '{print $2}'); do
+        resolvectl dns "$iface" "${dns_servers[@]}"
+    done
+    resolvectl flush-caches
 else
-  cp /etc/resolv.conf /etc/resolv.conf.bak.$(date +%s) || true
-  printf "%s\n" "${dns_servers[@]/#/nameserver }" > /etc/resolv.conf
+    echo "[*] systemd-resolved inactive, writing /etc/resolv.conf..."
+    cp /etc/resolv.conf /etc/resolv.conf.bak.$(date +%s) || true
+    printf "%s\n" "${dns_servers[@]/#/nameserver }" > /etc/resolv.conf
 fi
+
 
 # --- 5. Optimize interfaces ---
 echo "[*] Optimizing network interfaces..."
