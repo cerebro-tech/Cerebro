@@ -27,29 +27,25 @@ country=$(curl -s https://ipinfo.io/country || echo "")
 continent=$(curl -s https://ipapi.co/continent_code || echo "")
 echo "[*] Detected country: $country, continent: $continent"
 
-# --- 2. Choose reflector region ---
-if [[ "$country" == "UA" ]]; then
-    region_opt="--continent Europe"
-elif [[ "$continent" == "EU" ]]; then
-    region_opt="--continent Europe"
+# --- 2. Determine reflector countries based on continent ---
+if [[ "$country" == "UA" || "$continent" == "EU" ]]; then
+    countries=("Germany" "France" "Netherlands" "United Kingdom" "Switzerland" "Spain" "Italy")
 elif [[ "$continent" == "NA" ]]; then
-    region_opt="--continent North America"
-elif [[ "$continent" == "SA" ]]; then
-    region_opt="--continent South America"
+    countries=("United States" "Canada")
 elif [[ "$continent" == "AS" ]]; then
-    region_opt="--continent Asia"
-elif [[ "$continent" == "AF" ]]; then
-    region_opt="--continent Africa"
-elif [[ "$continent" == "OC" ]]; then
-    region_opt="--continent Oceania"
+    countries=("Japan" "Singapore" "South Korea" "Hong Kong")
 else
-    region_opt=""
+    countries=()  # fallback to all mirrors
 fi
-echo "[*] Using reflector option: $region_opt"
 
-# --- 3. Update mirrorlist ---
-echo "[*] Updating Arch mirrorlist..."
-reflector $region_opt --protocol https --age 12 --fastest 20 --sort rate --save /etc/pacman.d/mirrorlist
+# Build reflector command
+reflector_cmd="reflector --protocol https --age 12 --fastest 20 --sort rate --save /etc/pacman.d/mirrorlist"
+for c in "${countries[@]}"; do
+    reflector_cmd+=" --country $c"
+done
+
+echo "[*] Running: $reflector_cmd"
+eval "$reflector_cmd"
 
 # --- 4. Set DNS: Cloudflare primary, Google + Quad9 fallback ---
 echo "[*] Setting DNS..."
