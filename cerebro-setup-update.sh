@@ -1,6 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
+# Get current user
+USER_NAME=$(whoami)
+SCRIPT_PATH="~/cerebro/cerebro-update.sh"
+
+# Check if script exists
+if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "Error: $SCRIPT_PATH not found!"
+    exit 1
+fi
+
 # 1️⃣ Create main systemd service
 SERVICE_FILE="/etc/systemd/system/cerebro-update.service"
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
@@ -25,7 +35,7 @@ Requires=cerebro-update.service
 
 [Timer]
 # Run at 4AM every day, script handles 3-day interval
-OnCalendar=*-*-* 14:30:00
+OnCalendar=*-*-* 04:00:00
 Persistent=true
 WakeSystem=true
 
