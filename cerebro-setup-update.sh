@@ -35,7 +35,7 @@ Requires=cerebro-update.service
 
 [Timer]
 # Run at 4AM every day, script handles 3-day interval
-OnCalendar=*-*-* 14:27:00
+OnCalendar=*-*-* 14:28:00
 Persistent=true
 WakeSystem=true
 
