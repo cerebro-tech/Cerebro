@@ -6,6 +6,18 @@ LOGFILE="/var/log/cerebro-update.log"
 MARKER="/var/cache/cerebro-update.last"
 THREE_DAYS=$((3*24*3600))  # 72h
 
+# Create log file if it doesn't exist
+if [ ! -f "$LOGFILE" ]; then
+    sudo touch "$LOGFILE"
+    sudo chmod 644 "$LOGFILE"
+fi
+
+# Create marker file if it doesn't exist
+if [ ! -f "$MARKER" ]; then
+    sudo touch "$MARKER"
+    sudo chmod 644 "$MARKER"
+fi
+
 LAST_RUN=$(cat "$MARKER")
 NOW=$(date +%s)
 NEXT_RUN=$(( LAST_RUN + THREE_DAYS ))
