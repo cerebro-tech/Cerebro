@@ -2,14 +2,9 @@
 # cerebro-update.sh
 set -euo pipefail
 
-LOGFILE="/var/log/auto-update.log"
-MARKER="/var/lib/auto-update.last"
+LOGFILE="/var/log/cerebro-update.log"
+MARKER="/var/cache/cerebro-update.last"
 THREE_DAYS=$((3*24*3600))  # 72h
-
-mkdir -p "$(dirname "$MARKER")"
-if [ ! -f "$MARKER" ]; then
-    echo 0 > "$MARKER"
-fi
 
 LAST_RUN=$(cat "$MARKER")
 NOW=$(date +%s)
