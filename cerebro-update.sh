@@ -6,6 +6,10 @@ LOGFILE="/var/log/cerebro-update.log"
 MARKER="/var/cache/cerebro-update.last"
 THREE_DAYS=$((3*24*3600))  # 72h
 
+# Ensure user owns cache and log directories
+sudo chown $USER:$USER /var/cache
+sudo chown $USER:$USER /var/log
+
 # Create log file if it doesn't exist
 if [ ! -f "$LOGFILE" ]; then
     sudo touch "$LOGFILE"
