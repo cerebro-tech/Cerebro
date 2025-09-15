@@ -1,14 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Detect the original user (not root)
+# Detect the real (non-root) user home
 REAL_USER=${SUDO_USER:-$USER}
 USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 SCRIPT_PATH="$USER_HOME/cerebro/cerebro-update.sh"
 
-# Check if script exists
+# Check if update script exists
 if [ ! -f "$SCRIPT_PATH" ]; then
-    echo "Error: $SCRIPT_PATH not found!"
+    echo "❌ Error: $SCRIPT_PATH not found!"
     exit 1
 fi
 
@@ -25,7 +25,9 @@ Type=oneshot
 ExecStart=$SCRIPT_PATH
 EOF
 
-# 2️⃣ Create interval-aligned timer
+echo "✅ Created service: $SERVICE_FILE"
+
+# 2️⃣ Create timer (runs daily at 4AM, script enforces 3-day interval)
 TIMER_FILE="/etc/systemd/system/cerebro-update.timer"
 sudo tee "$TIMER_FILE" > /dev/null <<EOF
 [Unit]
@@ -33,7 +35,8 @@ Description=Cerebro Auto Update Timer
 Requires=cerebro-update.service
 
 [Timer]
-OnCalendar=*-*-* 14:58:00
+# Run every day at 4AM, script enforces once/3 days via marker
+OnCalendar=*-*-* 04:00:00
 Persistent=true
 WakeSystem=true
 
@@ -41,25 +44,12 @@ WakeSystem=true
 WantedBy=timers.target
 EOF
 
-# 3️⃣ Create suspend/hibernate trigger service
-SLEEP_SERVICE_FILE="/etc/systemd/system/cerebro-update-sleep.service"
-sudo tee "$SLEEP_SERVICE_FILE" > /dev/null <<EOF
-[Unit]
-Description=Run Cerebro Update Before Suspend/Hibernate
-Before=sleep.target
+echo "✅ Created timer: $TIMER_FILE"
 
-[Service]
-Type=oneshot
-ExecStart=$SCRIPT_PATH
-
-[Install]
-WantedBy=sleep.target
-EOF
-
-# 4️⃣ Reload systemd and enable
+# 3️⃣ Reload systemd and enable timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now cerebro-update.timer
-sudo systemctl enable --now cerebro-update-sleep.service
 
-echo "✅ Cerebro update timer and services installed!"
-systemctl list-timers cerebro-update.timer
+echo "✅ Cerebro auto-update installed and enabled!"
+echo "⏱  Next scheduled runs:"
+systemctl list-timers cerebro-update.timer | grep cerebro-update
