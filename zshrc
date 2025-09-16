@@ -3,7 +3,7 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-#⚙️  Base Environment Setup
+#⚙️ Base Environment Setup
 export ZDOTDIR="$HOME"
 export EDITOR="nano"
 export PAGER="less"
@@ -41,12 +41,12 @@ autoload -Uz compinit && compinit -C
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 
-#⚙️  Zsh Options
+#⚙️ Zsh Options
 setopt no_beep
 setopt prompt_subst
 setopt HIST_IGNORE_SPACE
 
-#⌨️  Keybindings (no substring search)
+#⌨️ Keybindings (no substring search)
 bindkey '^?' backward-delete-char      # Backspace
 bindkey '^[[3~' delete-char            # Delete key
 bindkey '^[[1;5C' forward-word         # Ctrl + Right arrow
@@ -57,15 +57,16 @@ alias ls='ls --color=auto'
 alias la='ls -la'
 alias pac='sudo pacman'
 alias updatearch='pac -Sc --noconfirm && paru -Sc --noconfirm && sudo fstrim -av && pac -Syu --needed --noconfirm && paru -Syu --needed --noconfirm'
+alias rbuild='~/my_scripts/ram_build.sh -sic'
 #alias dobackup='sudo /home/j/my_scripts/Do_Backup/cerebro_backup.sh'
 
-# 🔍 fzf Settings
+#🔍 fzf Settings
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-# 🎨 Powerlevel10k Config
+#🎨 Powerlevel10k Config
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 
-# 🚀 Git Automation Function
+#🚀 Git Automation Function
 unalias dogit 2>/dev/null
 dogit() {
   local msg
@@ -81,4 +82,3 @@ dogit() {
     git push origin main
   fi
 }
-alias rbuild='~/my_scripts/ram_build.sh -sic'
