@@ -134,7 +134,7 @@ sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems keyboa
 mkinitcpio -P
 
 # -------------------------
-# 7.6 EFISTUB Bootloader (with rootfstype=f2fs)
+# 7.6 EFISTUB Bootloader (rootfstype=f2fs, no splash)
 # -------------------------
 ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3)
 mkdir -p /boot/efi
@@ -154,22 +154,11 @@ efibootmgr -v
 systemctl enable ly
 
 # -------------------------
-# 7.8 Configure makepkg.conf
+# 7.8 Configure makepkg.conf (RAM builds, results in /builds)
 # -------------------------
-cat > /etc/makepkg.conf <<EOF_MAKEPKG
-# /etc/makepkg.conf
-
-MAKEFLAGS="-j$(nproc)"
-BUILDDIR="/tmp/makepkg"
-CCACHE_DIR="/var/cache/ccache"
-CCACHE_SIZE="50G"
-CCACHE_COMPRESS="true"
-CCACHE_COMPILERCHECK="content"
-CCACHE_CPP2="true"
-CCACHE_MAXFILES="20000"
-CCACHE_MAXSIZE="50G"
-LDFLAGS="-fuse-ld=mold"
-BUILDENV=(fakeroot distcc color ccache check !sign)
+cat > /etc/makepkg.conf <<'EOF_MAKEPKG'
+# Cerebro makepkg.conf - RAM builds
+$(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf)
 EOF_MAKEPKG
 
 # -------------------------
