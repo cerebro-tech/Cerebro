@@ -78,7 +78,7 @@ pacstrap $MNT \
   xorg-server \
   gnome-shell gnome-console gnome-control-center gnome-desktop-4 gnome-system-monitor gnome-text-editor gnome-session mutter \
   networkmanager \
-  gnome-keyring \
+  gnome-keyring shortwave nautilus \
   pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack \
   xdg-desktop-portal xdg-desktop-portal-gnome \
   xorg-xwayland \
