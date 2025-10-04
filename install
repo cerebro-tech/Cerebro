@@ -76,7 +76,7 @@ pacstrap $MNT \
   efibootmgr intel-ucode \
   ly \
   xorg-server \
-  gnome-shell gnome-console gnome-control-center gnome-desktop-4 gnome-text-editor gnome-session mutter \
+  gnome-shell gnome-console gnome-control-center gnome-desktop-4 gnome-system-monitor gnome-text-editor gnome-session mutter \
   networkmanager \
   gnome-keyring \
   pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack \
