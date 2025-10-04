@@ -11,11 +11,11 @@ HOSTNAME="cerebro"
 # =========================
 # 1. CLEAN DISK
 # =========================
-echo "=== Cleaning disk $DISK ==="
-wipefs -a "$DISK"
+#echo "=== Cleaning disk $DISK ==="
+#wipefs -a "$DISK"
 #sgdisk --zap-all "$DISK"
-nvme format -f $DISK
-dd if=/dev/zero of=$DISK bs=1M status=progress
+#nvme format -f $DISK
+#dd if=/dev/zero of=$DISK bs=1M status=progress
 
 # =========================
 # 2. CREATE PARTITIONS
