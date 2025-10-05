@@ -154,7 +154,6 @@ compression: lz4
 earlyMicrocode: true
 rootWait: true
 strip: true
-init: systemd
 BOO
   booster build -f --compress lz4 --strip /boot/booster-lts.img
 else
