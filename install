@@ -38,21 +38,21 @@ mkfs.xfs -f -L DATA "${DISK}p9"
 
 # 3. MOUNT PARTITIONS
 echo "3. Mounting partitions"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" "$MNT"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
 mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
 mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" "$MNT/var/cache"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MNT/var/log"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/var/lib"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/home"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" "$MNT/builds"
-mount -t xfs -o noatime,logbufs=8,logbsize=256k,allocsize=2M "${DISK}p9" "$MNT/data"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
+mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
 
 
 # 4. INSTALL BASE SYSTEM + ESSENTIAL PACKAGES
 echo "=== 4. Installing base system + essential packages ==="
-pacstrap $MNT \
+pacstrap /mnt \
   base base-devel \
   linux-lts \
   linux-firmware \
@@ -69,14 +69,14 @@ pacstrap $MNT \
 
 # 5. GENERATE FSTAB
 echo "=== 5. Generating fstab ==="
-genfstab -U $MNT >> $MNT/etc/fstab
-cat >> $MNT/etc/fstab <<EOF
+genfstab -U /mnt >> /mnt/etc/fstab
+cat >> /mnt/etc/fstab <<EOF
 tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
 EOF
 
 # 6. CHROOT AND SYSTEM CONFIGURATION
 echo "=== 6. Chrooting into new system ==="
-arch-chroot $MNT /bin/bash <<'EOF_CHROOT'
+arch-chroot /mnt /bin/bash <<'EOF_CHROOT'
 
 # 6.1 Timezone
 ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime
@@ -99,17 +99,16 @@ EOF_MAKEPKG
 
 # 7.2 Configure pacman.conf
 cat > /etc/pacman.conf <<EOF_PACMAN
-$(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf)
+$(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/pacman.conf)
 EOF_PACMAN
 
 # 7.3 Config mkinitcpio.conf, Initramfs
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems)/' /etc/mkinitcpio.conf
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
 # 8 Create EFISTUB Bootloader
-efibootmgr -c -d $DISK -p 1 \ -L "Cerebro LTS IntelGPU" \
--l '\vmlinuz-linux-lts' \
--u 'root=${DISK}p2 initrd=\initramfs-linux-lts.img resume=${DISK}p3 rw rootfstype=f2fs loglevel=3 quiet'
+efibootmgr -c -d $DISK -p 1 -L "Cerebro LTS IntelGPU" -l /vmlinuz-linux-lts \
+-u 'root=${DISK}p2 initrd=\initramfs-linux-lts.img resume=${DISK}p3 rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum loglevel=3 quiet'
 
 # Create user j with ZSH
 useradd -m -G wheel -s /bin/zsh j
@@ -122,7 +121,7 @@ systemctl enable ly
 
 EOF_CHROOT
 
-echo "=== Finalizing installation ==="
+echo "Finalizing installation"
 sync
 umount -R /mnt
 swapoff -a
