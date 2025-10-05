@@ -46,16 +46,16 @@ sgdisk -p "$DISK"
 
 # 2. FORMAT PARTITIONS
 echo "2. Formatting partitions"
-mkfs.fat -F32 -n BOOT "${DISK}p1"
+mkfs.fat -F32 -n BOOT ${DISK}p1
 F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
-mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
-mkswap -L SWAP "${DISK}p3"
-mkfs.f2fs $F2FS_OPTS -l VARCACHE "${DISK}p4"
-mkfs.f2fs $F2FS_OPTS -l VARLOG "${DISK}p5"
-mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p6"
-mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p7"
-mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p8"
-mkfs.xfs -f -L DATA "${DISK}p9"
+mkfs.f2fs $F2FS_OPTS -l ROOT ${DISK}p2
+mkswap -L SWAP ${DISK}p3
+mkfs.f2fs $F2FS_OPTS -l VARCACHE ${DISK}p4
+mkfs.f2fs $F2FS_OPTS -l VARLOG ${DISK}p5
+mkfs.f2fs $F2FS_OPTS -l VARLIB ${DISK}p6
+mkfs.f2fs $F2FS_OPTS -l HOME ${DISK}p7
+mkfs.f2fs $F2FS_OPTS -l BUILDS ${DISK}p8
+mkfs.xfs -f -L DATA ${DISK}p9
 
 
 # 3. MOUNT PARTITIONS
