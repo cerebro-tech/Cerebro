@@ -58,7 +58,7 @@ pacstrap $MNT \
   linux-firmware \
   sudo nano \
   efibootmgr intel-ucode \
-  ly \
+  ly zsh \
   gnome-shell gnome-desktop-4 gnome-session gnome-settings-daemon mutter gnome-control-center gnome-console gnome-system-monitor gnome-text-editor \
   networkmanager \
   gnome-keyring nautilus \
@@ -88,11 +88,7 @@ locale-gen
 echo LANG=en_US.UTF-8 > /etc/locale.conf
 
 # 6.3 Hostname
-echo "cerebro" > /etc/hostname
-
-# 6.4 Create user
-echo "j:123" | chpasswd
-sed -i '/^# %wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
+echo cerebro > /etc/hostname
 
 # 7.1 Configure makepkg.conf (RAM builds, results in /builds)
 mkdir -p /var/cache/ccache
@@ -107,19 +103,28 @@ $(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main
 EOF_PACMAN
 
 # 7.3 Config mkinitcpio.conf, Initramfs
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems keyboard resume fsck)/' /etc/mkinitcpio.conf
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
 # 8 Create EFISTUB Bootloader
-efibootmgr -c -d ${DISK} -p 1 \ -L "Cerebro LTS IntelGPU" \
+efibootmgr -c -d $DISK -p 1 \ -L "Cerebro LTS IntelGPU" \
 -l '\vmlinuz-linux-lts' \
--u "root=${DISK}p2 rw rootfstype=f2fs initrd=\\initramfs-linux-lts.img resume=${DISK}p3 loglevel=3 quiet" \
---verbose
+-u 'root=${DISK}p2 initrd=\initramfs-linux-lts.img resume=${DISK}p3 rw rootfstype=f2fs loglevel=3 quiet'
+
+# Create user j with ZSH
+useradd -m -G wheel -s /bin/zsh j
+echo "j:changeme" | chpasswd
+sed -i '/^# %wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
 
 # 9 Enable services
 systemctl enable NetworkManager
 systemctl enable ly
 
 EOF_CHROOT
+
+echo "=== Finalizing installation ==="
+sync
+umount -R /mnt
+swapoff -a
 
 echo "Cerebro installation completed successfully! Reboot."
