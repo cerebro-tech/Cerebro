@@ -95,7 +95,7 @@ pacstrap "$MNT" \
   pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber \
   xdg-desktop-portal xdg-desktop-portal-gnome xdg-utils \
   xorg-xwayland \
-  ccache mold ninja booster --noconfirm
+  ccache mold ninja --noconfirm --needed
 
 # ------------------------
 # 5) fstab with /data automount entry
@@ -146,23 +146,19 @@ echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
 chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
-# 6.4 Initramfs
-if [ "$USE_BOOSTER" = "true" ]; then
-  echo "Using Booster..."
-  cat > /etc/booster.yaml <<BOO
-compression: lz4
-earlyMicrocode: true
-rootWait: true
-strip: true
-BOO
-  booster build -f --compression lz4 --strip /boot/booster-lts.img
-else
-  cp /etc/mkinitcpio.conf /etc/mkinitcpio.conf.bak || true
-  sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems)/' /etc/mkinitcpio.conf
-  sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
-  sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf
-  mkinitcpio -P
-fi
+# 6.4 Initramfs (mkinitcpio, no Booster)
+echo "Generating initramfs with mkinitcpio..."
+
+# Minimal hooks for Intel CPU + NVIDIA GPU
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume)/' /etc/mkinitcpio.conf
+
+# Enable LZ4 compression for speed
+sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
+sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf
+
+# Generate initramfs for all kernels
+mkinitcpio -P
+
 
 # 6.5 Microcode shrink
 if pacman -Qs intel-ucode >/dev/null 2>&1; then
