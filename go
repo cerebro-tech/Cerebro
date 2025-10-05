@@ -10,67 +10,51 @@ MNT="/mnt"
 USERNAME="j"                # user to create
 PASSWORD="changeme"         # password (change or modify to prompt)
 
-# Partition sizes (tweak as you like)
-BOOT_SIZE="+1981M"
-ROOT_SIZE="+32G"
-SWAP_SIZE="+72G"
-VARCACHE_SIZE="+12G"
-VARLOG_SIZE="+8G"
-VARLIB_SIZE="+8G"
-HOME_SIZE="+22G"
-BUILDS_SIZE="+24G"
-# DATA = remaining
+# Clear partition table and filesystem signatures
+echo "=== 0. DISK CLEANING ==="
+sgdisk --zap-all /dev/nvme0n1
+wipefs -a /dev/nvme0n1
 
-echo "=== Cerebro installer START ==="
-echo "Disk: $DISK"
-echo "User: $USERNAME"
-
-
-# ------------------------
-# 1) Partition disk
-# ------------------------
-echo "=== 1. Partitioning ==="
-sgdisk --zap-all "$DISK"
-wipefs -a "$DISK"
-
-sgdisk -n1:0:$BOOT_SIZE -t1:EF00 -c1:"BOOT" "$DISK"
-sgdisk -n2:0:$ROOT_SIZE -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:$SWAP_SIZE -t3:8200 -c3:"SWAP" "$DISK"
-sgdisk -n4:0:$VARCACHE_SIZE -t4:8300 -c4:"VARCACHE" "$DISK"
-sgdisk -n5:0:$VARLOG_SIZE -t5:8300 -c5:"VARLOG" "$DISK"
-sgdisk -n6:0:$VARLIB_SIZE -t6:8300 -c6:"VARLIB" "$DISK"
-sgdisk -n7:0:$HOME_SIZE -t7:8300 -c7:"HOME" "$DISK"
-sgdisk -n8:0:$BUILDS_SIZE -t8:8300 -c8:"BUILDS" "$DISK"
-sgdisk -n9:0:0 -t9:8300 -c9:"DATA" "$DISK"
+# === 1. CREATE PARTITIONS ===
+echo "=== 1. Creating partitions ==="
+sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
+sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
+sgdisk -n3:0:+72G -t3:8200 -c3:"SWAP" "$DISK"
+sgdisk -n4:0:+12G -t3:8300 -c4:"VARCACHE" "$DISK"
+sgdisk -n5:0:+8G -t4:8300 -c5:"VARLOG" "$DISK"
+sgdisk -n6:0:+8G -t5:8300 -c6:"VARLIB" "$DISK"
+sgdisk -n7:0:+22G -t6:8300 -c7:"HOME" "$DISK"
+sgdisk -n8:0:+24G -t7:8300 -c8:"BUILDS" "$DISK"
+sgdisk -n9:0:0 -t8:8300 -c9:"DATA" "$DISK"
 sgdisk -p "$DISK"
+
 
 # 2. FORMAT PARTITIONS
 echo "2. Formatting partitions"
-mkfs.fat -F32 -n BOOT ${DISK}p1
+mkfs.fat -F32 -n BOOT "${DISK}p1"
 F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
-mkfs.f2fs $F2FS_OPTS -l ROOT ${DISK}p2
-mkswap -L SWAP ${DISK}p3
-mkfs.f2fs $F2FS_OPTS -l VARCACHE ${DISK}p4
-mkfs.f2fs $F2FS_OPTS -l VARLOG ${DISK}p5
-mkfs.f2fs $F2FS_OPTS -l VARLIB ${DISK}p6
-mkfs.f2fs $F2FS_OPTS -l HOME ${DISK}p7
-mkfs.f2fs $F2FS_OPTS -l BUILDS ${DISK}p8
-mkfs.xfs -f -L DATA ${DISK}p9
+mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
+mkswap -L SWAP "${DISK}p3"
+mkfs.f2fs $F2FS_OPTS -l VARCACHE "${DISK}p4"
+mkfs.f2fs $F2FS_OPTS -l VARLOG "${DISK}p5"
+mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p6"
+mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p7"
+mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p8"
+mkfs.xfs -f -L DATA "${DISK}p9"
 
 
 # 3. MOUNT PARTITIONS
 echo "3. Mounting partitions"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p2 /mnt
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
 mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
-mount -t vfat -o noatime ${DISK}p1 $MNT/boot
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p4 /mnt/var/cache
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p5 /mnt/var/log
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p6 /mnt/var/lib
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p7 /mnt/home
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p8 /mnt/builds
-mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M ${DISK}p9 /mnt/data
-
+mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
+mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
 
 # ------------------------
 # 4) Install base system + packages
