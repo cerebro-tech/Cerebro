@@ -60,16 +60,16 @@ mkfs.xfs -f -L DATA "${DISK}p9"
 
 # 3. MOUNT PARTITIONS
 echo "3. Mounting partitions"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p2 /mnt
 swapon "${DISK}p3"
 mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
-mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
-mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
+mount -t vfat -o noatime ${DISK}p1 $MNT/boot
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p4 /mnt/var/cache
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p5 /mnt/var/log
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p6 /mnt/var/lib
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p7 /mnt/home
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime ${DISK}p8 /mnt/builds
+mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M ${DISK}p9 /mnt/data
 
 
 # ------------------------
