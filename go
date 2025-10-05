@@ -59,7 +59,6 @@ mkfs.f2fs -f -l VARLOG "${DISK}p5"
 mkfs.f2fs -f -l VARLIB "${DISK}p6"
 mkfs.f2fs -f -l HOME "${DISK}p7"
 mkfs.f2fs -f -l BUILDS "${DISK}p8"
-# /data as F2FS (we will set automount in fstab)
 mkfs.f2fs -f -l DATA "${DISK}p9"
 
 # ------------------------
@@ -76,8 +75,7 @@ mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MN
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/var/lib"
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/home"
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" "$MNT/builds"
-# For now mount /data too (will be automounted on-demand after first boot)
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime,background_gc=on,discard "${DISK}p9" "$MNT/data"
+mount -t f2fs -o defaults,noatime, x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,background_gc=on "${DISK}p9" "$MNT/data"
 
 # ------------------------
 # 4) Install base system + packages
@@ -93,25 +91,18 @@ pacstrap "$MNT" \
   ly \
   gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
   pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber \
-  xdg-desktop-portal xdg-desktop-portal-gnome xdg-utils \
+  xdg-desktop-portal-gnome xdg-utils \
   xorg-xwayland \
   ccache mold ninja --noconfirm --needed
 
 # ------------------------
-# 5) fstab with /data automount entry
+# 5) fstab + tmpfs
 # ------------------------
-echo "=== 5. Generating fstab and appending /data automount ==="
+echo "=== 5. Generating fstab + addidng tmpfs ==="
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
-
-# Add optimized /data entry with x-systemd.automount (lazy mount) + nofail
-DATA_UUID=$(blkid -s UUID -o value "${DISK}p9" || true)
-if [ -n "$DATA_UUID" ]; then
-  cat >> "$MNT/etc/fstab" <<FSTAB_EOF
-
-# /data — F2FS for datasets, mounted on-demand (lazy automount)
-UUID=${DATA_UUID}  /data  f2fs  defaults,x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,discard,background_gc=on  0  2
-FSTAB_EOF
-fi
+cat >> /mnt/etc/fstab <<EOF
+tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
+EOF
 
 # ------------------------
 # 6) chroot and configure system
@@ -129,12 +120,8 @@ cat > /etc/hosts <<HOSTS_EOF
 HOSTS_EOF
 
 # 6.2 Create user and ensure home directory
-if id -u "$USERNAME" >/dev/null 2>&1; then
-  echo "User $USERNAME already exists"
-else
-  useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
-  echo "$USERNAME:$PASSWORD" | chpasswd
-fi
+useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
+echo "$USERNAME:$PASSWORD" | chpasswd
 
 mkdir -p "/home/$USERNAME"
 chown "$USERNAME:$USERNAME" "/home/$USERNAME"
@@ -146,7 +133,7 @@ echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
 chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
-# 6.4 Initramfs (mkinitcpio, no Booster)
+# 6.4 Initramfs
 echo "Generating initramfs with mkinitcpio..."
 
 # Minimal hooks for Intel CPU + NVIDIA GPU
@@ -160,23 +147,17 @@ sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.c
 mkinitcpio -P
 
 
-# 6.5 Microcode shrink
-if pacman -Qs intel-ucode >/dev/null 2>&1; then
-  pacman --noconfirm -S iucode-tool intel-ucode
-  iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img
-fi
-
-# 6.6 systemd tuning
+# 6.5 systemd tuning
 sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf
 sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
-# 6.7 EFISTUB entry
+# 6.6 EFISTUB entry
 efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
     -l /vmlinuz-linux-lts \
     -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 resume=LABEL=SWAP initrd=\initramfs-linux-lts.img"
 
-# 6.8 Enable essential services
+# 6.7 Enable essential services
 systemctl enable NetworkManager ly.service || true
 
 echo "Chroot configuration done."
