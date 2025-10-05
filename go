@@ -1,25 +1,55 @@
 #!/usr/bin/env bash
+# Cerebro full installer — EFISTUB, Booster-ready, /data automount, hibernation-safe
+# Edit DISK, USERNAME, PASSWORD, USE_BOOSTER before running.
 set -euo pipefail
+IFS=$'\n\t'
 
-# VARIABLES
-DISK="/dev/nvme0n1"
+# ------------------------
+# Config (edit these)
+# ------------------------
+DISK="/dev/nvme0n1"         # target disk (change!)
+MNT="/mnt"
+USERNAME="j"                # user to create
+PASSWORD="changeme"         # password (change or modify to prompt)
+USE_BOOSTER=true            # true -> use Booster; false -> use mkinitcpio
 
-# 1. PARTITIONING
-echo "=== 1. Creating partitions ==="
+# Partition sizes (tweak as you like)
+BOOT_SIZE="+1981M"
+ROOT_SIZE="+32G"
+SWAP_SIZE="+72G"
+VARCACHE_SIZE="+12G"
+VARLOG_SIZE="+8G"
+VARLIB_SIZE="+8G"
+HOME_SIZE="+22G"
+BUILDS_SIZE="+24G"
+# DATA = remaining
+
+echo "=== Cerebro installer START ==="
+echo "Disk: $DISK"
+echo "User: $USERNAME"
+echo "Booster enabled: $USE_BOOSTER"
+
+# ------------------------
+# 1) Partition disk
+# ------------------------
+echo "=== 1. Partitioning ==="
 sgdisk --zap-all "$DISK"
 wipefs -a "$DISK"
-sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
-sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:+32G -t3:8200 -c3:"SWAP" "$DISK"
-sgdisk -n4:0:+12G -t4:8300 -c4:"VARCACHE" "$DISK"
-sgdisk -n5:0:+8G -t5:8300 -c5:"VARLOG" "$DISK"
-sgdisk -n6:0:+8G -t6:8300 -c6:"VARLIB" "$DISK"
-sgdisk -n7:0:+22G -t7:8300 -c7:"HOME" "$DISK"
-sgdisk -n8:0:+24G -t8:8300 -c8:"BUILDS" "$DISK"
+
+sgdisk -n1:0:$BOOT_SIZE -t1:EF00 -c1:"BOOT" "$DISK"
+sgdisk -n2:0:$ROOT_SIZE -t2:8300 -c2:"ROOT" "$DISK"
+sgdisk -n3:0:$SWAP_SIZE -t3:8200 -c3:"SWAP" "$DISK"
+sgdisk -n4:0:$VARCACHE_SIZE -t4:8300 -c4:"VARCACHE" "$DISK"
+sgdisk -n5:0:$VARLOG_SIZE -t5:8300 -c5:"VARLOG" "$DISK"
+sgdisk -n6:0:$VARLIB_SIZE -t6:8300 -c6:"VARLIB" "$DISK"
+sgdisk -n7:0:$HOME_SIZE -t7:8300 -c7:"HOME" "$DISK"
+sgdisk -n8:0:$BUILDS_SIZE -t8:8300 -c8:"BUILDS" "$DISK"
 sgdisk -n9:0:0 -t9:8300 -c9:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
-# 2. FORMAT PARTITIONS
+# ------------------------
+# 2) Format partitions
+# ------------------------
 echo "=== 2. Formatting partitions ==="
 mkfs.fat -F32 "${DISK}p1" -n BOOT
 mkfs.f2fs -f -l ROOT "${DISK}p2"
@@ -29,80 +59,197 @@ mkfs.f2fs -f -l VARLOG "${DISK}p5"
 mkfs.f2fs -f -l VARLIB "${DISK}p6"
 mkfs.f2fs -f -l HOME "${DISK}p7"
 mkfs.f2fs -f -l BUILDS "${DISK}p8"
-mkfs.xfs -f -L DATA "${DISK}p9"
+# /data as F2FS (we will set automount in fstab)
+mkfs.f2fs -f -l DATA "${DISK}p9"
 
-# 3. MOUNT PARTITIONS
-echo "3. Mounting partitions"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
+# ------------------------
+# 3) Mount target
+# ------------------------
+echo "=== 3. Mount partitions ==="
+mount "${DISK}p2" "$MNT"
 swapon "${DISK}p3"
-mkdir -p /mnt/{boot,var/cache,var/log,var/lib,home,builds,data}
-mount -t vfat -o noatime "${DISK}p1" /mnt/boot
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
-mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
 
-# 4. INSTALL BASE SYSTEM
+mkdir -p "$MNT"/{boot,var/cache,var/log,var/lib,home,builds,data}
+mount -t vfat "${DISK}p1" "$MNT/boot"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" "$MNT/var/cache"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MNT/var/log"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/var/lib"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/home"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" "$MNT/builds"
+# For now mount /data too (will be automounted on-demand after first boot)
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime,background_gc=on,discard "${DISK}p9" "$MNT/data"
+
+# ------------------------
+# 4) Install base system + packages
+# ------------------------
 echo "=== 4. Installing base system + packages ==="
-pacstrap /mnt \
+pacstrap "$MNT" \
   base base-devel \
   linux-lts \
   linux-firmware \
-  sudo nano \
-  efibootmgr intel-ucode \
-  ly zsh \
-  gnome-shell gnome-desktop-4 gnome-session gnome-settings-daemon mutter gnome-control-center gnome-console gnome-system-monitor gnome-text-editor \
+  sudo nano zsh \
+  efibootmgr intel-ucode iucode-tool \
   networkmanager \
-  gnome-keyring nautilus \
-  pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack \
+  ly \
+  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
+  pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber \
   xdg-desktop-portal xdg-desktop-portal-gnome xdg-utils \
   xorg-xwayland \
-  ccache mold ninja
+  ccache mold ninja booster --noconfirm
 
-# 5. GENERATE FSTAB
-echo "=== 5. Generating fstab ==="
-genfstab -U /mnt >> /mnt/etc/fstab
-cat >> /mnt/etc/fstab <<EOF
-tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
-EOF
+# ------------------------
+# 5) fstab with /data automount entry
+# ------------------------
+echo "=== 5. Generating fstab and appending /data automount ==="
+genfstab -U "$MNT" >> "$MNT/etc/fstab"
 
-# 6. CHROOT INTO NEW SYSTEM
-echo "=== 6. Chrooting into new system ==="
-arch-chroot /mnt /bin/bash <<'EOF'
+# Add optimized /data entry with x-systemd.automount (lazy mount) + nofail
+DATA_UUID=$(blkid -s UUID -o value "${DISK}p9" || true)
+if [ -n "$DATA_UUID" ]; then
+  cat >> "$MNT/etc/fstab" <<FSTAB_EOF
 
-# 6.1 CONFIGURE mkinitcpio
-echo "=== Configuring mkinitcpio ==="
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume fsck)/' /etc/mkinitcpio.conf
-sed -i 's/^#COMPRESSION="lz4"/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
-sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf
-sed -i "s/^PRESETS=('default' 'fallback')/PRESETS=('default')/" /etc/mkinitcpio.d/linux.preset
-mkinitcpio -P
-rm -f /boot/initramfs-*-fallback.img
+# /data — F2FS for datasets, mounted on-demand (lazy automount)
+UUID=${DATA_UUID}  /data  f2fs  defaults,x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,discard,background_gc=on  0  2
+FSTAB_EOF
+fi
 
-# 6.2 SET EFISTUB BOOT ENTRY
-echo "=== Setting EFISTUB boot entry ==="
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS IntelGPU" -l "\vmlinuz-linux-lts" \
-  -u "root=LABEL=ROOT resume=LABEL=SWAP rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum loglevel=3 quiet initrd=\initramfs-linux-lts.img"
+# ------------------------
+# 6) chroot and configure system
+# ------------------------
+echo "=== 6. Chroot and configure the system ==="
+arch-chroot "$MNT" /bin/bash <<'CHROOT_EOF'
+set -euo pipefail
 
-# 6.3 HOSTNAME & NETWORK
-echo cerebro > /etc/hostname
-cat > /etc/hosts <<EOL
+# 6.1 Hostname and /etc/hosts
+echo "cerebro" > /etc/hostname
+cat > /etc/hosts <<HOSTS_EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   cerebro.localdomain  cerebro
+HOSTS_EOF
 
-# 6.4 CREATE USER
-useradd -m -G wheel -s /bin/zsh j
-echo "j:123" | chpasswd
-sed -i '/^# %wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
+# 6.2 Create user and ensure home directory (correct order; no sudo here)
+USERNAME="'"$USERNAME"'"
+PASSWORD="'"$PASSWORD"'"
 
-# 7 Enable services
-systemctl enable NetworkManager
-systemctl enable ly
-EOF
+if id -u "$USERNAME" >/dev/null 2>&1; then
+  echo "User $USERNAME already exists"
+else
+  useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
+  echo "$USERNAME:$PASSWORD" | chpasswd
+fi
 
-# 8. FINALIZE INSTALLATION
-echo "=== 7. Finalizing installation ==="
-sync
-umount -R /mnt
-swapoff -a
-echo "Installation complete. Reboot into your new Cerebro OS!"
+# Ensure home dir exists and correct ownership/perm (idempotent)
+mkdir -p "/home/$USERNAME"
+chown "$USERNAME:$USERNAME" "/home/$USERNAME"
+chmod 700 "/home/$USERNAME"
+
+# 6.3 Sudoers: enable wheel group
+if [ ! -d /etc/sudoers.d ]; then
+  mkdir -p /etc/sudoers.d
+  chmod 755 /etc/sudoers.d
+fi
+if [ ! -f /etc/sudoers.d/10-wheel ]; then
+  echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
+  chmod 440 /etc/sudoers.d/10-wheel
+fi
+visudo -c || true
+
+# 6.4 Initramfs: Booster or mkinitcpio
+USE_BOOSTER="'"$USE_BOOSTER"'"
+if [ "$USE_BOOSTER" = "true" ]; then
+  echo "Using Booster to build initramfs..."
+  # booster config
+  cat > /etc/booster.yaml <<BOO
+compression: lz4
+earlyMicrocode: true
+rootWait: true
+splash: false
+strip: true
+init: systemd
+BOO
+  booster build || { echo "Booster build failed"; exit 1; }
+else
+  echo "Configuring mkinitcpio for systemd hooks and threaded LZ4..."
+  cp /etc/mkinitcpio.conf /etc/mkinitcpio.conf.bak || true
+  sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems)/' /etc/mkinitcpio.conf
+  sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf || true
+  sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf || true
+  sed -i '/fsck/d' /etc/mkinitcpio.conf || true
+  mkinitcpio -P
+  find /etc/mkinitcpio.d/ -type f -name "*.preset" -exec sed -i "s/PRESETS=('default' 'fallback')/PRESETS=('default')/" {} \; || true
+  rm -f /boot/*fallback*.img || true
+fi
+
+# 6.5 microcode shrink hook and initial shrink (intel-ucode)
+if pacman -Qs intel-ucode >/dev/null 2>&1; then
+  pacman --noconfirm -S iucode-tool intel-ucode || true
+  cat > /etc/pacman.d/hooks/shrink-intel-ucode.hook <<HOOKEOF
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = intel-ucode
+
+[Action]
+Description = Minimizing intel-ucode.img ...
+When = PostTransaction
+Depends = iucode-tool
+Exec = /usr/bin/iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img
+HOOKEOF
+  # Run once to create earlyfw
+  iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img || true
+fi
+
+# 6.6 systemd tuning / silent boot improvements
+# Set conservative but faster timeouts (7s)
+sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf || true
+sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf || true
+
+# Prefer socket activation where appropriate (enable sockets if installed)
+for s in dbus.socket avahi-daemon.socket cups.socket; do
+  systemctl enable "$s" >/dev/null 2>&1 || true
+done
+
+# Optionally disable wait-online to speed network boots (if not needed)
+systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+
+# 6.7 Copy kernel/initramfs to /boot and create EFISTUB entry
+KERNEL="/vmlinuz-linux-lts"
+INITRD="/initramfs-linux-lts.img"
+if [ -f "/boot${KERNEL}" ]; then
+  cp -v "/boot${KERNEL}" /boot/ || true
+fi
+if [ -f "/boot${INITRD}" ]; then
+  cp -v "/boot${INITRD}" /boot/ || true
+fi
+
+ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2 || true)
+SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3 || true)
+
+if command -v efibootmgr >/dev/null 2>&1; then
+  efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
+    -l "\\vmlinuz-linux-lts" \
+    -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img" || true
+fi
+
+# 6.8 Enable essential services
+systemctl enable NetworkManager ly.service || true
+
+echo "Chroot configuration done."
+CHROOT_EOF
+
+# ------------------------
+# 7) Finalize
+# ------------------------
+echo "=== 7. Finalize & cleanup ==="
+umount -R "$MNT" || true
+swapoff -a || true
+
+echo "Installation finished."
+echo "- Please verify EFISTUB settings in firmware if needed."
+echo "- Consider adding kernel cmdline options (via firmware/efibootmgr):"
+echo "    quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
+echo "Reboot when ready."
+
+# End of script
