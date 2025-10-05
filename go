@@ -35,7 +35,7 @@ mkfs.xfs -f -L DATA "${DISK}p9"
 echo "3. Mounting partitions"
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
-mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
+mkdir -p /mnt/{boot,var/cache,var/log,var/lib,home,builds,data}
 mount -t vfat -o noatime "${DISK}p1" /mnt/boot
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
