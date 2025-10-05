@@ -155,7 +155,7 @@ earlyMicrocode: true
 rootWait: true
 strip: true
 BOO
-  booster build -f --compress lz4 --strip /boot/booster-lts.img
+  booster build -f --compression lz4 --strip /boot/booster-lts.img
 else
   cp /etc/mkinitcpio.conf /etc/mkinitcpio.conf.bak || true
   sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems)/' /etc/mkinitcpio.conf
