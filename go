@@ -87,8 +87,8 @@ pacstrap "$MNT" \
   base base-devel \
   linux-lts linux-lts-headers \
   linux-firmware \
-  sudo nano zsh \
-  efibootmgr intel-ucode iucode-tool \
+  efibootmgr sudo nano zsh \
+  intel-ucode iucode-tool nvidia-dkms nvidia-utils \
   networkmanager \
   ly \
   gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
