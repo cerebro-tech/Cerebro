@@ -177,16 +177,9 @@ sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/sys
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
 # 6.7 EFISTUB entry
-ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2 2>/dev/null || true)
-SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3 2>/dev/null || true)
-
-if [ -n "$ROOT_UUID" ]; then
-  efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
-    -l "\\vmlinuz-linux-lts" \
-    -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img"
-else
-  echo "WARNING: ROOT_UUID not found — skipping EFISTUB creation"
-fi
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
+    -l /vmlinuz-linux-lts \
+    -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 resume=LABEL=SWAP initrd=\initramfs-linux-lts.img"
 
 # 6.8 Enable essential services
 systemctl enable NetworkManager ly.service || true
@@ -204,7 +197,7 @@ swapoff -a || true
 echo "Installation finished."
 echo "- Please verify EFISTUB settings in firmware if needed."
 echo "- Consider adding kernel cmdline options (via firmware/efibootmgr):"
-echo "    quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
+echo "- quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
 echo "Reboot when ready."
 
 # End of script
