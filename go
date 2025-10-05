@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================
 # VARIABLES
-# ============================
 DISK="/dev/nvme0n1"
-MNT="/mnt"
 
 # 1. PARTITIONING
 echo "=== 1. Creating partitions ==="
@@ -34,17 +31,17 @@ mkfs.f2fs -f -l BUILDS "${DISK}p8"
 mkfs.xfs -f -L DATA "${DISK}p9"
 
 # 3. MOUNT PARTITIONS
-echo "=== 3. Mounting partitions ==="
-mount "${DISK}p2" "$MNT"
+echo "3. Mounting partitions"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
 mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
-mount -t vfat "${DISK}p1" "$MNT/boot"
-mount -t f2fs "${DISK}p4" "$MNT/var/cache"
-mount -t f2fs "${DISK}p5" "$MNT/var/log"
-mount -t f2fs "${DISK}p6" "$MNT/var/lib"
-mount -t f2fs "${DISK}p7" "$MNT/home"
-mount -t f2fs "${DISK}p8" "$MNT/builds"
-mount -t xfs "${DISK}p9" "$MNT/data"
+mount -t vfat -o noatime "${DISK}p1" /mnt/boot
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
+mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
 
 # 4. INSTALL BASE SYSTEM
 echo "=== 4. Installing base system + packages ==="
@@ -65,18 +62,16 @@ pacstrap /mnt \
 
 # 5. GENERATE FSTAB
 echo "=== 5. Generating fstab ==="
-genfstab -U $MNT >> $MNT/etc/fstab
+genfstab -U /mnt >> /mnt/etc/fstab
 cat >> /mnt/etc/fstab <<EOF
 tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
 EOF
 
 # 6. CHROOT INTO NEW SYSTEM
 echo "=== 6. Chrooting into new system ==="
-arch-chroot $MNT /bin/bash <<'EOF'
+arch-chroot /mnt /bin/bash <<'EOF'
 
-# ----------------------------
 # 6.1 CONFIGURE mkinitcpio
-# ----------------------------
 echo "=== Configuring mkinitcpio ==="
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume fsck)/' /etc/mkinitcpio.conf
 sed -i 's/^#COMPRESSION="lz4"/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
@@ -91,7 +86,7 @@ efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS IntelGPU" -l "\vmlinuz-linux-
   -u "root=LABEL=ROOT resume=LABEL=SWAP rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum loglevel=3 quiet initrd=\initramfs-linux-lts.img"
 
 # 6.3 HOSTNAME & NETWORK
-echo "cerebro" > /etc/hostname
+echo cerebro > /etc/hostname
 cat > /etc/hosts <<EOL
 
 # 6.4 CREATE USER
