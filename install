@@ -4,9 +4,6 @@ set -euo pipefail
 # VARIABLES
 DISK="/dev/nvme0n1"
 MNT="/mnt"
-HOSTNAME="cerebro"
-USERNAME="j"
-USERPASS="123"
 
 # === 1. CREATE PARTITIONS ===
 sgdisk -n1:0:+1G -t1:EF00 -c1:"BOOT" "$DISK"
