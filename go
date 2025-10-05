@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Cerebro full installer — EFISTUB, Booster-ready, /data automount, hibernation-safe
-# Edit DISK, USERNAME, PASSWORD, USE_BOOSTER before running.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -64,16 +62,15 @@ mkfs.f2fs -f -l DATA "${DISK}p9"
 # 3) Mount target
 # ------------------------
 echo "=== 3. Mount partitions ==="
-mount "${DISK}p2" "$MNT"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
-
-mkdir -p "$MNT"/{boot,var/cache,var/log,var/lib,home,builds,data}
-mount -t vfat "${DISK}p1" "$MNT/boot"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" "$MNT/var/cache"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MNT/var/log"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/var/lib"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/home"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" "$MNT/builds"
+mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
+mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
 mount -t f2fs -o defaults,noatime, x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,background_gc=on "${DISK}p9" "$MNT/data"
 
 # ------------------------
