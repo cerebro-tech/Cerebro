@@ -85,7 +85,7 @@ mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime,background_gc=on
 echo "=== 4. Installing base system + packages ==="
 pacstrap "$MNT" \
   base base-devel \
-  linux-lts \
+  linux-lts linux-lts-headers \
   linux-firmware \
   sudo nano zsh \
   efibootmgr intel-ucode iucode-tool \
