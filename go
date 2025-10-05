@@ -129,15 +129,9 @@ cat > /etc/hosts <<HOSTS_EOF
 HOSTS_EOF
 
 # 6.2 Create user and ensure home directory (correct order; no sudo here)
-USERNAME="'"$USERNAME"'"
-PASSWORD="'"$PASSWORD"'"
+useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
+echo "$USERNAME:$PASSWORD" | chpasswd
 
-if id -u "$USERNAME" >/dev/null 2>&1; then
-  echo "User $USERNAME already exists"
-else
-  useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
-  echo "$USERNAME:$PASSWORD" | chpasswd
-fi
 
 # Ensure home dir exists and correct ownership/perm (idempotent)
 mkdir -p "/home/$USERNAME"
