@@ -8,16 +8,15 @@ HOSTNAME="cerebro"
 USERNAME="j"
 USERPASS="123"
 
-# 1. CREATE PARTITIONS
-echo "=== 1. Creating GPT partitions ==="
-sgdisk -n1:0:+1981M  -t2:8300 -c1:"BOOT"        "$DISK"
-sgdisk -n2:0:+32G    -t3:8300 -c2:"ROOT"        "$DISK"
-sgdisk -n3:0:+12G    -t4:8300 -c3:"VARCACHE"    "$DISK"
-sgdisk -n4:0:+8G     -t5:8300 -c4:"VARLOG"      "$DISK"
-sgdisk -n5:0:+8G     -t6:8300 -c5:"VARLIB"      "$DISK"
-sgdisk -n6:0:+22G    -t7:8300 -c6:"HOME"        "$DISK"
-sgdisk -n7:0:+24G    -t8:8300 -c7:"BUILDS"      "$DISK"
-sgdisk -n8:0:0       -t9:8300 -c8:"DATA"        "$DISK"
+# === 1. CREATE PARTITIONS ===
+sgdisk -n1:0:+1G -t1:EF00 -c1:"BOOT" "$DISK"
+sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
+sgdisk -n3:0:+12G -t3:8300 -c3:"VARCACHE" "$DISK"
+sgdisk -n4:0:+8G -t4:8300 -c4:"VARLOG" "$DISK"
+sgdisk -n5:0:+8G -t5:8300 -c5:"VARLIB" "$DISK"
+sgdisk -n6:0:+22G -t6:8300 -c6:"HOME" "$DISK"
+sgdisk -n7:0:+24G -t7:8300 -c7:"BUILDS" "$DISK"
+sgdisk -n8:0:0 -t8:8300 -c8:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
 
@@ -125,6 +124,7 @@ useradd -m -G wheel,audio,video,network,power -s /bin/bash j
 echo "j:123" | chpasswd
 echo "root:999" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
 
 EOF_CHROOT
 
