@@ -44,24 +44,22 @@ sgdisk -n8:0:$BUILDS_SIZE -t8:8300 -c8:"BUILDS" "$DISK"
 sgdisk -n9:0:0 -t9:8300 -c9:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
-# ------------------------
-# 2) Format partitions
-# ------------------------
-echo "=== 2. Formatting partitions ==="
-mkfs.fat -F32 "${DISK}p1" -n BOOT
-mkfs.f2fs -f -l ROOT "${DISK}p2"
+# 2. FORMAT PARTITIONS
+echo "2. Formatting partitions"
+mkfs.fat -F32 -n BOOT "${DISK}p1"
+F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
+mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
 mkswap -L SWAP "${DISK}p3"
-mkfs.f2fs -f -l VARCACHE "${DISK}p4"
-mkfs.f2fs -f -l VARLOG "${DISK}p5"
-mkfs.f2fs -f -l VARLIB "${DISK}p6"
-mkfs.f2fs -f -l HOME "${DISK}p7"
-mkfs.f2fs -f -l BUILDS "${DISK}p8"
-mkfs.f2fs -f -l DATA "${DISK}p9"
+mkfs.f2fs $F2FS_OPTS -l VARCACHE "${DISK}p4"
+mkfs.f2fs $F2FS_OPTS -l VARLOG "${DISK}p5"
+mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p6"
+mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p7"
+mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p8"
+mkfs.xfs -f -L DATA "${DISK}p9"
 
-# ------------------------
-# 3) Mount target
-# ------------------------
-echo "=== 3. Mount partitions ==="
+
+# 3. MOUNT PARTITIONS
+echo "3. Mounting partitions"
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
 swapon "${DISK}p3"
 mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
@@ -71,7 +69,8 @@ mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
-mount -t f2fs -o defaults,noatime, x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,background_gc=on "${DISK}p9" "$MNT/data"
+mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
+
 
 # ------------------------
 # 4) Install base system + packages
@@ -97,6 +96,10 @@ pacstrap "$MNT" \
 # ------------------------
 echo "=== 5. Generating fstab + addidng tmpfs ==="
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
+
+# Append options for /data F2FS
+echo "UUID=$(blkid -s UUID -o value ${DISK}p4) /data f2fs defaults,x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,discard,background_gc=on 0 2" >> "$MNT/etc/fstab"
+
 cat >> /mnt/etc/fstab <<EOF
 tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
 EOF
