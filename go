@@ -11,7 +11,6 @@ DISK="/dev/nvme0n1"         # target disk (change!)
 MNT="/mnt"
 USERNAME="j"                # user to create
 PASSWORD="changeme"         # password (change or modify to prompt)
-USE_BOOSTER=true            # true -> use Booster; false -> use mkinitcpio
 
 # Partition sizes (tweak as you like)
 BOOT_SIZE="+1981M"
@@ -27,7 +26,7 @@ BUILDS_SIZE="+24G"
 echo "=== Cerebro installer START ==="
 echo "Disk: $DISK"
 echo "User: $USERNAME"
-echo "Booster enabled: $USE_BOOSTER"
+
 
 # ------------------------
 # 1) Partition disk
@@ -84,7 +83,7 @@ echo "=== 4. Installing base system + packages ==="
 pacstrap "$MNT" \
   base base-devel \
   linux-lts linux-lts-headers \
-  linux-firmware \
+  xfsprogs f2fs-tools \
   efibootmgr sudo nano zsh \
   intel-ucode iucode-tool nvidia-dkms nvidia-utils \
   networkmanager \
@@ -94,6 +93,7 @@ pacstrap "$MNT" \
   xdg-desktop-portal-gnome xdg-utils \
   xorg-xwayland \
   ccache mold ninja --noconfirm --needed
+
 
 # ------------------------
 # 5) fstab + tmpfs
@@ -135,7 +135,6 @@ visudo -c || true
 
 # 6.4 Initramfs
 echo "Generating initramfs with mkinitcpio..."
-
 # Minimal hooks for Intel CPU + NVIDIA GPU
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume)/' /etc/mkinitcpio.conf
 
