@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-IFS=$'\n\t'
 
-# ------------------------
-# Config (edit these)
-# ------------------------
-DISK="/dev/nvme0n1"         # target disk (change!)
+echo "🔧 Enabling NTP"
+timedatectl set-ntp true
+
+# VARIABLES
+DISK="/dev/nvme0n1"
 MNT="/mnt"
-USERNAME="j"                # user to create
-PASSWORD="changeme"         # password (change or modify to prompt)
+USERNAME="j"
+PASSWORD="changeme" 
 
 # Clear partition table and filesystem signatures
 echo "=== 0. DISK CLEANING ==="
