@@ -117,7 +117,7 @@ fi
 # 6) chroot and configure system
 # ------------------------
 echo "=== 6. Chroot and configure the system ==="
-arch-chroot "$MNT" /bin/bash <<'CHROOT_EOF'
+arch-chroot "$MNT" /bin/bash <<CHROOT_EOF
 set -euo pipefail
 
 # 6.1 Hostname and /etc/hosts
@@ -128,104 +128,64 @@ cat > /etc/hosts <<HOSTS_EOF
 127.0.1.1   cerebro.localdomain  cerebro
 HOSTS_EOF
 
-# 6.2 Create user and ensure home directory (correct order; no sudo here)
-useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
-echo "$USERNAME:$PASSWORD" | chpasswd
+# 6.2 Create user and ensure home directory
+if id -u "$USERNAME" >/dev/null 2>&1; then
+  echo "User $USERNAME already exists"
+else
+  useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
+  echo "$USERNAME:$PASSWORD" | chpasswd
+fi
 
-
-# Ensure home dir exists and correct ownership/perm (idempotent)
 mkdir -p "/home/$USERNAME"
 chown "$USERNAME:$USERNAME" "/home/$USERNAME"
 chmod 700 "/home/$USERNAME"
 
-# 6.3 Sudoers: enable wheel group
-if [ ! -d /etc/sudoers.d ]; then
-  mkdir -p /etc/sudoers.d
-  chmod 755 /etc/sudoers.d
-fi
-if [ ! -f /etc/sudoers.d/10-wheel ]; then
-  echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
-  chmod 440 /etc/sudoers.d/10-wheel
-fi
+# 6.3 Sudoers
+mkdir -p /etc/sudoers.d
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
-# 6.4 Initramfs: Booster or mkinitcpio
-USE_BOOSTER="'"$USE_BOOSTER"'"
+# 6.4 Initramfs
 if [ "$USE_BOOSTER" = "true" ]; then
-  echo "Using Booster to build initramfs..."
-  # booster config
+  echo "Using Booster..."
   cat > /etc/booster.yaml <<BOO
 compression: lz4
 earlyMicrocode: true
 rootWait: true
-splash: false
 strip: true
 init: systemd
 BOO
-  booster build || { echo "Booster build failed"; exit 1; }
+  booster build
 else
-  echo "Configuring mkinitcpio for systemd hooks and threaded LZ4..."
   cp /etc/mkinitcpio.conf /etc/mkinitcpio.conf.bak || true
   sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems)/' /etc/mkinitcpio.conf
-  sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf || true
-  sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf || true
-  sed -i '/fsck/d' /etc/mkinitcpio.conf || true
+  sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
+  sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf
   mkinitcpio -P
-  find /etc/mkinitcpio.d/ -type f -name "*.preset" -exec sed -i "s/PRESETS=('default' 'fallback')/PRESETS=('default')/" {} \; || true
-  rm -f /boot/*fallback*.img || true
 fi
 
-# 6.5 microcode shrink hook and initial shrink (intel-ucode)
+# 6.5 Microcode shrink
 if pacman -Qs intel-ucode >/dev/null 2>&1; then
-  pacman --noconfirm -S iucode-tool intel-ucode || true
-  cat > /etc/pacman.d/hooks/shrink-intel-ucode.hook <<HOOKEOF
-[Trigger]
-Type = Package
-Operation = Install
-Operation = Upgrade
-Target = intel-ucode
-
-[Action]
-Description = Minimizing intel-ucode.img ...
-When = PostTransaction
-Depends = iucode-tool
-Exec = /usr/bin/iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img
-HOOKEOF
-  # Run once to create earlyfw
-  iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img || true
+  pacman --noconfirm -S iucode-tool intel-ucode
+  iucode_tool -S /usr/lib/firmware/intel-ucode --overwrite --write-earlyfw=/boot/intel-ucode.img
 fi
 
-# 6.6 systemd tuning / silent boot improvements
-# Set conservative but faster timeouts (7s)
-sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf || true
-sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf || true
-
-# Prefer socket activation where appropriate (enable sockets if installed)
-for s in dbus.socket avahi-daemon.socket cups.socket; do
-  systemctl enable "$s" >/dev/null 2>&1 || true
-done
-
-# Optionally disable wait-online to speed network boots (if not needed)
+# 6.6 systemd tuning
+sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf
+sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
-# 6.7 Copy kernel/initramfs to /boot and create EFISTUB entry
-KERNEL="/vmlinuz-linux-lts"
-INITRD="/initramfs-linux-lts.img"
-if [ -f "/boot${KERNEL}" ]; then
-  cp -v "/boot${KERNEL}" /boot/ || true
-fi
-if [ -f "/boot${INITRD}" ]; then
-  cp -v "/boot${INITRD}" /boot/ || true
-fi
+# 6.7 EFISTUB entry
+ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2)
+SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3)
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
+  -l "\\vmlinuz-linux-lts" \
+  -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img"
 
-ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2 || true)
-SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3 || true)
-
-if command -v efibootmgr >/dev/null 2>&1; then
-  efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
-    -l "\\vmlinuz-linux-lts" \
-    -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img" || true
-fi
+systemctl enable NetworkManager ly.service
+echo "Chroot setup complete."
+CHROOT_EOF
 
 # 6.8 Enable essential services
 systemctl enable NetworkManager ly.service || true
