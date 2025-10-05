@@ -177,15 +177,16 @@ sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/sys
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
 # 6.7 EFISTUB entry
-ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2)
-SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3)
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
-  -l "\\vmlinuz-linux-lts" \
-  -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img"
+ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p2 2>/dev/null || true)
+SWAP_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3 2>/dev/null || true)
 
-systemctl enable NetworkManager ly.service
-echo "Chroot setup complete."
-CHROOT_EOF
+if [ -n "$ROOT_UUID" ]; then
+  efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
+    -l "\\vmlinuz-linux-lts" \
+    -u "root=UUID=${ROOT_UUID} rw rootflags=compress_algorithm=lz4,compress_chksum resume=UUID=${SWAP_UUID} initrd=\\initramfs-linux-lts.img"
+else
+  echo "WARNING: ROOT_UUID not found — skipping EFISTUB creation"
+fi
 
 # 6.8 Enable essential services
 systemctl enable NetworkManager ly.service || true
