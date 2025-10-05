@@ -7,6 +7,7 @@ DISK="/dev/nvme0n1"
 # 1. PARTITIONING
 echo "=== 1. Creating partitions ==="
 sgdisk --zap-all "$DISK"
+wipefs -a "$DISK"
 sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
 sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
 sgdisk -n3:0:+32G -t3:8200 -c3:"SWAP" "$DISK"
