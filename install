@@ -8,6 +8,11 @@ timedatectl set-ntp true
 DISK="/dev/nvme0n1"
 MNT="/mnt"
 
+# Clear partition table and filesystem signatures
+echo "=== 0. DISK CLEANING ==="
+sgdisk --zap-all /dev/nvme0n1
+wipefs -a /dev/nvme0n1
+
 # === 1. CREATE PARTITIONS ===
 echo "=== 1. Creating partitions ==="
 sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
@@ -24,10 +29,10 @@ sgdisk -p "$DISK"
 
 # 2. FORMAT PARTITIONS
 echo "2. Formatting partitions"
-mkfs.fat -F32 "${DISK}p1"
+mkfs.fat -F32 -n BOOT "${DISK}p1"
 F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
 mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
-mkswap "${DISK}p3"
+mkswap -L SWAP "${DISK}p3"
 mkfs.f2fs $F2FS_OPTS -l VARCACHE "${DISK}p4"
 mkfs.f2fs $F2FS_OPTS -l VARLOG "${DISK}p5"
 mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p6"
@@ -103,7 +108,7 @@ $(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main
 EOF_PACMAN
 
 # 7.3 Config mkinitcpio.conf, Initramfs
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/' /etc/mkinitcpio.conf
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
 # 8 Create EFISTUB Bootloader
