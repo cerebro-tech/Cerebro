@@ -1,76 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =========================
 # VARIABLES
-# =========================
 DISK="/dev/nvme0n1"
 MNT="/mnt"
 HOSTNAME="cerebro"
+USERNAME="j"
+USERPASS="123"
 
-# =========================
-# 1. CLEAN DISK
-# =========================
-#echo "=== Cleaning disk $DISK ==="
-#wipefs -a "$DISK"
-#sgdisk --zap-all "$DISK"
-#nvme format -f $DISK
-#dd if=/dev/zero of=$DISK bs=1M status=progress
-
-# =========================
-# 2. CREATE PARTITIONS
-# =========================
-echo "=== Creating GPT partitions ==="
-sgdisk -n1:0:+1G     -t1:EF00 -c1:"EFI"         "$DISK"
-sgdisk -n2:0:+1981M  -t2:8300 -c2:"BOOT"        "$DISK"
-sgdisk -n3:0:+32G    -t3:8300 -c3:"ROOT"        "$DISK"
-sgdisk -n4:0:+12G    -t4:8300 -c4:"VARCACHE"    "$DISK"
-sgdisk -n5:0:+8G     -t5:8300 -c5:"VARLOG"      "$DISK"
-sgdisk -n6:0:+8G     -t6:8300 -c6:"VARLIB"      "$DISK"
-sgdisk -n7:0:+22G    -t7:8300 -c7:"HOME"        "$DISK"
-sgdisk -n8:0:+24G    -t8:8300 -c8:"BUILDS"      "$DISK"
-sgdisk -n9:0:0       -t9:8300 -c9:"DATA"        "$DISK"
+# 1. CREATE PARTITIONS
+echo "=== 1. Creating GPT partitions ==="
+sgdisk -n1:0:+1981M  -t2:8300 -c1:"BOOT"        "$DISK"
+sgdisk -n2:0:+32G    -t3:8300 -c2:"ROOT"        "$DISK"
+sgdisk -n3:0:+12G    -t4:8300 -c3:"VARCACHE"    "$DISK"
+sgdisk -n4:0:+8G     -t5:8300 -c4:"VARLOG"      "$DISK"
+sgdisk -n5:0:+8G     -t6:8300 -c5:"VARLIB"      "$DISK"
+sgdisk -n6:0:+22G    -t7:8300 -c6:"HOME"        "$DISK"
+sgdisk -n7:0:+24G    -t8:8300 -c7:"BUILDS"      "$DISK"
+sgdisk -n8:0:0       -t9:8300 -c8:"DATA"        "$DISK"
 sgdisk -p "$DISK"
 
-# =========================
-# 3. FORMAT PARTITIONS
-# =========================
-echo "=== Formatting partitions ==="
+
+# 2. FORMAT PARTITIONS
+echo "=== 2. Formatting partitions ==="
 mkfs.fat -F32 "${DISK}p1"
-mkfs.ext4 -F -L BOOT "${DISK}p2"
 
 F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
-mkfs.f2fs $F2FS_OPTS -l ROOT      "${DISK}p3"
-mkfs.f2fs $F2FS_OPTS -l VARCACHE  "${DISK}p4"
-mkfs.f2fs $F2FS_OPTS -l VARLOG    "${DISK}p5"
-mkfs.f2fs $F2FS_OPTS -l VARLIB    "${DISK}p6"
-mkfs.f2fs $F2FS_OPTS -l HOME      "${DISK}p7"
-mkfs.f2fs $F2FS_OPTS -l BUILDS    "${DISK}p8"
+mkfs.f2fs $F2FS_OPTS -l ROOT      "${DISK}p2"
+mkfs.f2fs $F2FS_OPTS -l VARCACHE  "${DISK}p3"
+mkfs.f2fs $F2FS_OPTS -l VARLOG    "${DISK}p4"
+mkfs.f2fs $F2FS_OPTS -l VARLIB    "${DISK}p5"
+mkfs.f2fs $F2FS_OPTS -l HOME      "${DISK}p6"
+mkfs.f2fs $F2FS_OPTS -l BUILDS    "${DISK}p7"
+mkfs.xfs -f -L DATA "${DISK}p8"
 
-mkfs.xfs -f -L DATA "${DISK}p9"
 
-# =========================
-# 4. MOUNT PARTITIONS
-# =========================
-echo "=== Mounting partitions ==="
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p3" "$MNT"
-mkdir -p $MNT/{boot,efi,var/cache,var/log,var/lib,home,builds,data}
-mount -t ext4 -o noatime "${DISK}p2" "$MNT/boot"
-mount -t vfat "${DISK}p1" "$MNT/efi"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" "$MNT/var/cache"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MNT/var/log"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/var/lib"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/home"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" "$MNT/builds"
-mount -t xfs -o noatime,logbufs=8,logbsize=256k,allocsize=2M "${DISK}p9" "$MNT/data"
+# 3. MOUNT PARTITIONS
+echo "=== 3. Mounting partitions ==="
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" "$MNT"
+mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
+mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p3" "$MNT/var/cache"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" "$MNT/var/log"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" "$MNT/var/lib"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" "$MNT/home"
+mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" "$MNT/builds"
+mount -t xfs -o noatime,logbufs=8,logbsize=256k,allocsize=2M "${DISK}p8" "$MNT/data"
 
-# =========================
-# 5. INSTALL BASE SYSTEM + ESSENTIAL PACKAGES
-# =========================
-echo "=== Installing base system + essential packages ==="
+
+# 4. INSTALL BASE SYSTEM + ESSENTIAL PACKAGES
+echo "=== 4. Installing base system + essential packages ==="
 pacstrap $MNT \
   base \
-  linux-lts linux-lts-headers \
+  linux-lts \
   linux-firmware \
   vim nano \
   efibootmgr intel-ucode \
@@ -84,37 +66,27 @@ pacstrap $MNT \
   xorg-xwayland \
   ccache mold ninja
 
-# =========================
-# 6. GENERATE FSTAB
-# =========================
-echo "=== Generating fstab ==="
+# 5. GENERATE FSTAB
+echo "=== 5. Generating fstab ==="
 genfstab -U -p $MNT >> $MNT/etc/fstab
 cat >> $MNT/etc/fstab <<EOF
 tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
 EOF
 
-# =========================
-# 7. CHROOT AND SYSTEM CONFIGURATION
-# =========================
-echo "=== Chrooting into new system ==="
+# 6. CHROOT AND SYSTEM CONFIGURATION
+echo "=== 6. Chrooting into new system ==="
 arch-chroot $MNT /bin/bash <<'EOF_CHROOT'
 
-# -------------------------
-# 7.1 Timezone
-# -------------------------
+# 6.1 Timezone
 ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime
 hwclock --systohc
 
-# -------------------------
-# 7.2 Locale
-# -------------------------
+# 6.2 Locale
 sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
-# -------------------------
-# 7.3 Hostname
-# -------------------------
+# 6.3 Hostname
 echo "cerebro" > /etc/hostname
 cat > /etc/hosts <<EOF_HOSTS
 127.0.0.1   localhost
@@ -122,69 +94,38 @@ cat > /etc/hosts <<EOF_HOSTS
 127.0.1.1   cerebro.localdomain cerebro
 EOF_HOSTS
 
-# -------------------------
-# 7.4 Enable Network
-# -------------------------
+# 6.4 Enable services
 systemctl enable NetworkManager
+systemctl enable ly
 
-# -------------------------
-# 7.5 Initramfs
-# -------------------------
+# 6.5 Initramfs
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
-# -------------------------
-# 7.6 EFISTUB Bootloader (rootfstype=f2fs, no splash)
-# -------------------------
-ROOT_UUID=$(blkid -s UUID -o value /dev/nvme0n1p3)
-mkdir -p /boot/efi
-mount /dev/nvme0n1p1 /boot/efi
-efibootmgr --create \
-  --disk /dev/nvme0n1 \
-  --part 1 \
-  --loader /boot/vmlinuz-linux-lts \
-  --label "Arch Linux LTS" \
-  --unicode "root=UUID=$ROOT_UUID rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum,noatime" \
+# 7.6 EFISTUB Bootloader
+efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Cerebro LTS IntelGPU" \
+  --loader /vmlinuz-linux-lts \
+  --unicode "root=${DISK}p2 rw rootfstype=f2fs initrd=/initramfs-linux-lts.img loglevel=3 quiet" \
   --verbose
-efibootmgr -v
 
-# -------------------------
-# 7.7 Enable Ly
-# -------------------------
-systemctl enable ly
-
-# -------------------------
-# 7.8 Configure makepkg.conf (RAM builds, results in /builds)
-# -------------------------
+# 7.7 Configure makepkg.conf (RAM builds, results in /builds)
+mkdir -p /var/cache/ccache
+chmod 777 /var/cache/ccache
 cat > /etc/makepkg.conf <<'EOF_MAKEPKG'
-# Cerebro makepkg.conf - RAM builds
 $(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf)
 EOF_MAKEPKG
 
-# -------------------------
-# 7.9 Configure pacman.conf
-# -------------------------
+# 7.8 Configure pacman.conf
 cat > /etc/pacman.conf <<EOF_PACMAN
-[options]
-HoldPkg = pacman glibc
-Architecture = auto
-Color
-CheckSpace
-ParallelDownloads = 10
-DownloadUser = alpm
-SigLevel = Required DatabaseOptional LocalFileSigLevel = Optional
-
-[core]
-Include = /etc/pacman.d/mirrorlist
-
-[extra]
-Include = /etc/pacman.d/mirrorlist
-
-[multilib]
-Include = /etc/pacman.d/mirrorlist
+$(curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/refs/heads/main/makepkg.conf)
 EOF_PACMAN
+
+# === 8. Create user ===
+useradd -m -G wheel,audio,video,network,power -s /bin/bash j
+echo "j:123" | chpasswd
+echo "root:999" | chpasswd
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
 
 EOF_CHROOT
 
-echo "=== Installation completed successfully! ==="
-echo "Reboot and boot into your new Cerebro Arch Linux system."
+echo "=== Cerebro installation completed successfully! Reboot. ==="
