@@ -4,7 +4,5 @@ LABEL=HOME /home f2fs noatime,nodiratime,compress_algorithm=lz4,compress_chksum,
 LABEL=BUILDS /builds xfs noatime,nodiratime,inode64,attr2,swalloc 0 2
 LABEL=BOOT /boot vfat umask=0077,noatime,iocharset=utf8,errors=remount-ro 0 2
 LABEL=DATA /data xfs noauto,noatime,nodiratime,inode64,swalloc 0 0
-
 tmpfs /rambuilds tmpfs defaults,noatime,mode=1777,size=50G 0 0
 tmpfs /var/cache tmpfs defaults,noatime,mode=1777 0 0
-tmpfs /var/log tmpfs defaults,noatime,mode=0755 0 0
