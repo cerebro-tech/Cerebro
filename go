@@ -4,7 +4,7 @@ set -euo pipefail
 DISK="/dev/nvme0n1"
 MNT="/mnt"
 USERNAME="j"
-PASSWORD="changeme" 
+PASSWORD="ppp" 
 
 echo "==> 0. Enabling NTP"
 timedatectl set-ntp true
@@ -37,28 +37,21 @@ mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,disca
 mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p8" /mnt/builds
 mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
 
-# ------------------------
-# 4) Install base system + packages
-# ------------------------
-echo "=== 4. Installing base system + packages ==="
-pacstrap "$MNT" \
+
+echo "==>4. Installing base system + packages"
+pacstrap /mnt \
   base base-devel \
   linux-lts linux-lts-headers \
-  xfsprogs f2fs-tools \
+  xfsprogs f2fs-tools dosfstools \
   efibootmgr sudo nano zsh \
-  intel-ucode iucode-tool nvidia-dkms nvidia-utils \
-  networkmanager \
-  ly \
-  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
+  intel-ucode nvidia-dkms nvidia-utils \
+  networkmanager ly \
+  gnome-shell gnome-desktop-4 mutter gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
   pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber \
   xdg-desktop-portal-gnome xdg-utils \
-  xorg-xwayland \
+  xorg-server xorg-xkbmap xorg-xwayland \
   ccache mold ninja --noconfirm --needed
 
-
-# ------------------------
-# 5) fstab + tmpfs
-# ------------------------
 echo "=== 5. Generating fstab + addidng tmpfs ==="
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
 
