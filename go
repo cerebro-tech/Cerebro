@@ -31,11 +31,11 @@ mkfs.xfs -L BUILDS "${DISK}p5"
 mkfs.xfs -L DATA -f "${DISK}p6"
 
 echo "==>3. Mounting partitions"
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry,ssd "${DISK}p2" /mnt
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry "${DISK}p2" /mnt
 mkdir -p /mnt/{boot,var/lib,home,builds,data}
 mount -t vfat -o noatime,nodiratime,umask=0077,iocharset=utf8,errors=remount-ro "${DISK}p1" /mnt/boot
 mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p6" /mnt/var/lib
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry,ssd "${DISK}p7" /mnt/home
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry "${DISK}p7" /mnt/home
 mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p8" /mnt/builds
 mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
 
