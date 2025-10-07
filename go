@@ -6,37 +6,36 @@ MNT="/mnt"
 USERNAME="j"
 PASSWORD="changeme" 
 
-echo "Enabling NTP"
+echo "==> 0. Enabling NTP"
 timedatectl set-ntp true
 
-echo "=== 0. DISK CLEANING ==="
-sudo nvme format --ses=1 --lbaf=1 $DISK
+echo "==> 1. Secure erase + setting the block size to 4KB"
+nvme format --ses=1 --lbaf=1 $DISK
 
 sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
-sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:+8G -t5:8300 -c3:"VARLIB" "$DISK"
-sgdisk -n4:0:+22G -t6:8300 -c4:"HOME" "$DISK"
-sgdisk -n5:0:+24G -t7:8300 -c5:"BUILDS" "$DISK"
+sgdisk -n2:0:+40G -t2:8300 -c2:"ROOT" "$DISK"
+sgdisk -n3:0:+16G -t5:8300 -c3:"VARLIB" "$DISK"
+sgdisk -n4:0:+24G -t6:8300 -c4:"HOME" "$DISK"
+sgdisk -n5:0:+18G -t7:8300 -c5:"BUILDS" "$DISK"
 sgdisk -n6:0:0 -t8:8300 -c6:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
-echo "2. Formatting partitions"
-mkfs.fat -F32 -n BOOT "${DISK}p1"
-F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
-mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
-mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p3"
-mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p4"
-mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p5"
-mkfs.xfs -f -L DATA "${DISK}p6"
+echo "==> 2. Formatting partitions"
+mkfs.fat -n BOOT -F32 "${DISK}p1"
+mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"
+mkfs.xfs -L VARLIB -f "${DISK}p3"
+mkfs.f2fs -l HOME -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p4"
+mkfs.xfs -L BUILDS "${DISK}p5"
+mkfs.xfs -L DATA -f "${DISK}p6"
 
-echo "3. Mounting partitions"
+echo "==>3. Mounting partitions"
 mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry,ssd "${DISK}p2" /mnt
-mkdir -p $MNT/{boot,var/lib,home,builds,data}
-mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
-mount -t xfs -o noatime,logbufs=8,logbsize=128k,allocsize=2M "${DISK}p9" /mnt/data
+mkdir -p /mnt/{boot,var/lib,home,builds,data}
+mount -t vfat -o noatime,nodiratime,umask=0077,iocharset=utf8,errors=remount-ro "${DISK}p1" /mnt/boot
+mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p6" /mnt/var/lib
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry,ssd "${DISK}p7" /mnt/home
+mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p8" /mnt/builds
+mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
 
 # ------------------------
 # 4) Install base system + packages
