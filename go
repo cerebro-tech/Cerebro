@@ -34,10 +34,10 @@ echo "==>3. Mounting partitions"
 mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p2" /mnt
 mkdir -p /mnt/{boot,var/lib,home,builds,data}
 mount -t vfat -o noatime,nodiratime "${DISK}p1" /mnt/boot
-mount -t xfs -o noatime,nodiratime,inode64 "${DISK}p6" /mnt/var/lib
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p7" /mnt/home
-mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p8" /mnt/builds
-mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
+mount -t xfs -o noatime,nodiratime,inode64 "${DISK}p3" /mnt/var/lib
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p4" /mnt/home
+mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p5" /mnt/builds
+mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p6" /mnt/data
 
 echo "==>4. Installing base system + packages"
 pacstrap /mnt \
