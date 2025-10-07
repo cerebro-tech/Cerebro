@@ -1,5 +1,5 @@
 LABEL=ROOT / f2fs noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry 0 1
-LABEL=LIB /var/lib xfs noatime,nodiratime,discard,inode64 0 2
+LABEL=VARLIB /var/lib xfs noatime,nodiratime,discard,inode64 0 2
 LABEL=HOME /home f2fs noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry 0 0
 LABEL=BUILDS /builds xfs noatime,nodiratime,inode64,attr2,swalloc 0 2
 LABEL=BOOT /boot vfat umask=0077,noatime,iocharset=utf8,errors=remount-ro 0 2
