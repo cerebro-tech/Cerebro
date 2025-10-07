@@ -40,17 +40,16 @@ mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
 
 echo "==>4. Installing base system + packages"
 pacstrap /mnt \
-  base base-devel \
-  linux-lts linux-lts-headers \
-  xfsprogs f2fs-tools dosfstools \
-  efibootmgr sudo nano zsh \
+  base linux-lts linux-lts-headers \
+  xfsprogs dosfstools efibootmgr sudo nano zsh \
   intel-ucode nvidia-dkms nvidia-utils \
   networkmanager ly \
-  gnome-shell gnome-desktop-4 mutter gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor \
-  pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber \
+  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor nautilus \
+  pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   xdg-desktop-portal-gnome xdg-utils \
-  xorg-server xorg-xkbmap xorg-xwayland \
+  xorg-server xorg-xwayland \
   ccache mold ninja --noconfirm --needed
+
 
 echo "=== 5. Generating fstab + addidng tmpfs ==="
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
