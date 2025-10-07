@@ -94,7 +94,7 @@ visudo -c || true
 # 6.4 Initramfs
 echo "Generating initramfs with mkinitcpio..."
 # Minimal hooks for Intel CPU + NVIDIA GPU
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard resume)/' /etc/mkinitcpio.conf
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
 
 # Enable LZ4 compression for speed
 sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
@@ -120,17 +120,11 @@ systemctl enable NetworkManager ly.service || true
 echo "Chroot configuration done."
 CHROOT_EOF
 
-# ------------------------
-# 7) Finalize
-# ------------------------
 echo "=== 7. Finalize & cleanup ==="
-umount -R "$MNT" || true
-swapoff -a || true
+umount -R /mnt || true
 
 echo "Installation finished."
 echo "- Please verify EFISTUB settings in firmware if needed."
 echo "- Consider adding kernel cmdline options (via firmware/efibootmgr):"
 echo "- quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
 echo "Reboot when ready."
-
-# End of script
