@@ -37,93 +37,69 @@ mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,disca
 mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p8" /mnt/builds
 mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p9" /mnt/data
 
-
 echo "==>4. Installing base system + packages"
 pacstrap /mnt \
   base linux-lts linux-lts-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
   intel-ucode nvidia-dkms nvidia-utils \
   networkmanager ly \
-  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-console gnome-system-monitor gnome-text-editor nautilus \
+  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   xdg-desktop-portal-gnome xdg-utils \
   xorg-server xorg-xwayland \
   ccache mold ninja --noconfirm --needed
 
+echo "==>5. Generating fstab"
+genfstab -U /mnt >> /mnt/etc/fstab
 
-echo "=== 5. Generating fstab + addidng tmpfs ==="
-genfstab -U "$MNT" >> "$MNT/etc/fstab"
-
-# Append options for /data F2FS
-echo "UUID=$(blkid -s UUID -o value ${DISK}p4) /data f2fs defaults,x-systemd.automount,nofail,compress_algorithm=lz4,compress_chksum,discard,background_gc=on 0 2" >> "$MNT/etc/fstab"
-
-cat >> /mnt/etc/fstab <<EOF
-tmpfs   /tmp    tmpfs   size=100%,mode=1777,noatime 0 0
-EOF
-
-# ------------------------
-# 6) chroot and configure system
-# ------------------------
-echo "=== 6. Chroot and configure the system ==="
-arch-chroot "$MNT" /bin/bash <<CHROOT_EOF
+echo "==>6. Chroot and configure the system ==="
+arch-chroot /mnt /bin/bash <<CHROOT_EOF
 set -euo pipefail
 
-# 6.1 Hostname and /etc/hosts
-echo "cerebro" > /etc/hostname
-cat > /etc/hosts <<HOSTS_EOF
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   cerebro.localdomain  cerebro
-HOSTS_EOF
+curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/fstab > /etc/fstab
+curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/makepkg.conf > /etc/makepkg.conf
+curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/pacman.conf > /etc/pacman.conf
 
-# 6.2 Create user and ensure home directory
-useradd -m -G wheel,audio,video,network,power -s /bin/zsh "$USERNAME"
+echo "cerebro" > /etc/hostname
+useradd -m -G wheel,audio,video,storage,network,power -s /bin/zsh "$USERNAME"
 echo "$USERNAME:$PASSWORD" | chpasswd
 
 mkdir -p "/home/$USERNAME"
 chown "$USERNAME:$USERNAME" "/home/$USERNAME"
 chmod 700 "/home/$USERNAME"
 
-# 6.3 Sudoers
 mkdir -p /etc/sudoers.d
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
 chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
-# 6.4 Initramfs
-echo "Generating initramfs with mkinitcpio..."
-# Minimal hooks for Intel CPU + NVIDIA GPU
+echo "==>7. Initramfs Customization"
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
-
-# Enable LZ4 compression for speed
 sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
-sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-T0)/' /etc/mkinitcpio.conf
+sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-4)/' /etc/mkinitcpio.conf
 
-# Generate initramfs for all kernels
+echo "==>8. Generate Initramfs for all kernels"
 mkinitcpio -P
 
-
-# 6.5 systemd tuning
+echo "==>9. Systemd tuning"
 sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf
 sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
-# 6.6 EFISTUB entry
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS (EFISTUB)" \
+echo "==>10. Boot entry creating"
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS" \
     -l /vmlinuz-linux-lts \
-    -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 resume=LABEL=SWAP initrd=\initramfs-linux-lts.img"
+    -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux-lts.img"
 
-# 6.7 Enable essential services
 systemctl enable NetworkManager ly.service || true
 
-echo "Chroot configuration done."
+echo "==>11. Chroot configuration done"
 CHROOT_EOF
 
-echo "=== 7. Finalize & cleanup ==="
+echo "==> 12. Finalize & cleanup"
 umount -R /mnt || true
 
 echo "Installation finished."
-echo "- Please verify EFISTUB settings in firmware if needed."
 echo "- Consider adding kernel cmdline options (via firmware/efibootmgr):"
 echo "- quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
 echo "Reboot when ready."
