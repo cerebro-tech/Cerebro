@@ -1,56 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🔧 Enabling NTP"
-timedatectl set-ntp true
-
-# VARIABLES
 DISK="/dev/nvme0n1"
 MNT="/mnt"
 USERNAME="j"
 PASSWORD="changeme" 
 
-# Clear partition table and filesystem signatures
-echo "=== 0. DISK CLEANING ==="
-sgdisk --zap-all /dev/nvme0n1
-wipefs -a /dev/nvme0n1
+echo "Enabling NTP"
+timedatectl set-ntp true
 
-# === 1. CREATE PARTITIONS ===
-echo "=== 1. Creating partitions ==="
+echo "=== 0. DISK CLEANING ==="
+sudo nvme format --ses=1 --lbaf=1 $DISK
+
 sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
 sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:+72G -t3:8200 -c3:"SWAP" "$DISK"
-sgdisk -n4:0:+12G -t3:8300 -c4:"VARCACHE" "$DISK"
-sgdisk -n5:0:+8G -t4:8300 -c5:"VARLOG" "$DISK"
-sgdisk -n6:0:+8G -t5:8300 -c6:"VARLIB" "$DISK"
-sgdisk -n7:0:+22G -t6:8300 -c7:"HOME" "$DISK"
-sgdisk -n8:0:+24G -t7:8300 -c8:"BUILDS" "$DISK"
-sgdisk -n9:0:0 -t8:8300 -c9:"DATA" "$DISK"
+sgdisk -n3:0:+8G -t5:8300 -c3:"VARLIB" "$DISK"
+sgdisk -n4:0:+22G -t6:8300 -c4:"HOME" "$DISK"
+sgdisk -n5:0:+24G -t7:8300 -c5:"BUILDS" "$DISK"
+sgdisk -n6:0:0 -t8:8300 -c6:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
-
-# 2. FORMAT PARTITIONS
 echo "2. Formatting partitions"
 mkfs.fat -F32 -n BOOT "${DISK}p1"
 F2FS_OPTS="-f -O extra_attr,inode_checksum,sb_checksum,compression"
 mkfs.f2fs $F2FS_OPTS -l ROOT "${DISK}p2"
-mkswap -L SWAP "${DISK}p3"
-mkfs.f2fs $F2FS_OPTS -l VARCACHE "${DISK}p4"
-mkfs.f2fs $F2FS_OPTS -l VARLOG "${DISK}p5"
-mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p6"
-mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p7"
-mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p8"
-mkfs.xfs -f -L DATA "${DISK}p9"
+mkfs.f2fs $F2FS_OPTS -l VARLIB "${DISK}p3"
+mkfs.f2fs $F2FS_OPTS -l HOME "${DISK}p4"
+mkfs.f2fs $F2FS_OPTS -l BUILDS "${DISK}p5"
+mkfs.xfs -f -L DATA "${DISK}p6"
 
-
-# 3. MOUNT PARTITIONS
 echo "3. Mounting partitions"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p2" /mnt
-swapon "${DISK}p3"
-mkdir -p $MNT/{boot,var/cache,var/log,var/lib,home,builds,data}
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry,ssd "${DISK}p2" /mnt
+mkdir -p $MNT/{boot,var/lib,home,builds,data}
 mount -t vfat -o noatime "${DISK}p1" "$MNT/boot"
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p4" /mnt/var/cache
-mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p5" /mnt/var/log
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p6" /mnt/var/lib
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p7" /mnt/home
 mount -t f2fs -o compress_algorithm=lz4,compress_chksum,noatime "${DISK}p8" /mnt/builds
