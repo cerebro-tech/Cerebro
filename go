@@ -39,14 +39,14 @@ mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p6" /mnt/data
 
 echo "==>4. Installing base system + packages"
 pacstrap /mnt \
-  base linux-lts linux-lts-headers \
+  base base-devel linux-lts linux-lts-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
   intel-ucode nvidia-dkms nvidia-utils \
   networkmanager ly \
   gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   xdg-desktop-portal-gnome xdg-utils \
-  xorg-server xorg-xwayland \
+  xorg xorg-xinit xorg-xwayland \
   ccache mold ninja --noconfirm --needed
 
 echo "==>5. Generating fstab"
