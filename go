@@ -11,14 +11,15 @@ timedatectl set-ntp true
 
 echo "==> 1. Secure erase + setting the block size to 4KB"
 wipefs -a $DISK
+sgdisk --zap-all $DISK
 nvme format -f --ses=1 --lbaf=1 $DISK
 
 sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
 sgdisk -n2:0:+40G -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:+16G -t5:8300 -c3:"VARLIB" "$DISK"
-sgdisk -n4:0:+24G -t6:8300 -c4:"HOME" "$DISK"
-sgdisk -n5:0:+18G -t7:8300 -c5:"BUILDS" "$DISK"
-sgdisk -n6:0:0 -t8:8300 -c6:"DATA" "$DISK"
+sgdisk -n3:0:+16G -t3:8300 -c3:"VARLIB" "$DISK"
+sgdisk -n4:0:+24G -t4:8300 -c4:"HOME" "$DISK"
+sgdisk -n5:0:+18G -t5:8300 -c5:"BUILDS" "$DISK"
+sgdisk -n6:0:0 -t6:8300 -c6:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
