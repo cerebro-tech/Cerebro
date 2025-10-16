@@ -27,26 +27,25 @@ mkdir -p /mnt/{boot,data}
 mount -t vfat -o noatime,nodiratime "${DISK}p1" /mnt/boot
 mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p6" /mnt/data
 
-echo "==>4. Installing base system + packages"
+echo "==>4. Generating fstab"
+genfstab -L /mnt >> /mnt/etc/fstab
+
+echo "==>5. Installing base system + packages"
 pacstrap /mnt \
   base base-devel linux linux-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
   intel-ucode nvidia-dkms nvidia-utils \
   networkmanager ly \
-  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
+  gnome-shell gnome-control-center gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   xdg-desktop-portal-gnome \
   xorg xorg-xinit xorg-xwayland \
   ccache mold ninja --noconfirm --needed
 
-echo "==>5. Generating fstab"
-genfstab -L /mnt >> /mnt/etc/fstab
-
 echo "==>6. Chroot and configure the system ==="
 arch-chroot /mnt /bin/bash <<CHROOT_EOF
 set -euo pipefail
 
-curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/fstab > /etc/fstab
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/makepkg.conf > /etc/makepkg.conf
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/pacman.conf > /etc/pacman.conf
 
