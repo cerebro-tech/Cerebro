@@ -20,15 +20,15 @@ sgdisk -n3:0:0 -t3:8300 -c3:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
-mkfs.fat -n BOOT -F32 "${DISK}p1"
-mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"
-mkfs.xfs -L DATA -f "${DISK}p6"
+mkfs.fat -n BOOT -F32 "${DISK}1"
+mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}2"
+mkfs.xfs -L DATA -f "${DISK}p3"
 
 echo "==>3. Mounting partitions"
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p2" /mnt
+mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}2" /mnt
 mkdir -p /mnt/{boot,data}
-mount -t vfat -o noatime,nodiratime "${DISK}p1" /mnt/boot
-mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p6" /mnt/data
+mount -t vfat -o noatime,nodiratime "${DISK}1" /mnt/boot
+mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}3" /mnt/data
 
 echo "==>4. Generating fstab"
 genfstab -L /mnt >> /mnt/etc/fstab
@@ -79,7 +79,7 @@ sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/sys
 systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
 echo "==>10. Boot entry creating"
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro Arch" \
+efibootmgr -c -d $DISK -p 1 -L "Cerebro Arch" \
     -l /vmlinuz-linux \
     -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux.img"
 
