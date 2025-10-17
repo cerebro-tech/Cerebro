@@ -22,7 +22,7 @@ sgdisk -p "$DISK"
 echo "==> 2. Formatting partitions"
 mkfs.fat -n BOOT -F32 "${DISK}1"
 mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}2"
-mkfs.xfs -L DATA -f "${DISK}p3"
+mkfs.xfs -L DATA -f "${DISK}3"
 
 echo "==>3. Mounting partitions"
 mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}2" /mnt
