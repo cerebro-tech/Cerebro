@@ -21,11 +21,15 @@ sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
 mkfs.fat -n BOOT -F32 "${DISK}1"
+#mkfs.fat -F 32 -s 8 -S 512 -n BOOT ${DISK}p1
 mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}2"
+#mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression -C lz4 ${DISK}p2
 mkfs.xfs -L DATA -f "${DISK}3"
+#mkfs.xfs -L DATA -f ${DISK}p3
 
 echo "==>3. Mounting partitions"
 mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}2" /mnt
+#mount -t f2fs -o defaults,noatime,nodiscard,compress_algorithm=lz4,compress_chksum,fastboot ${DISK}p2 /mnt
 mkdir -p /mnt/{boot,data}
 mount -t vfat -o noatime,nodiratime "${DISK}1" /mnt/boot
 mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}3" /mnt/data
