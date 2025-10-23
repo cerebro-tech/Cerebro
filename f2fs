@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DISK="/dev/sda"
-#DISK="/dev/nvme0n1"
+DISK="/dev/nvme0n1"
+DISK2="/dev/sda"
 USERNAME="j"
-PASSWORD="'''" 
+PASSWORD="\\\" 
 
 echo "==> 0. Enabling NTP"
 timedatectl set-ntp true
 
 echo "==> 1. Secure erase + setting the block size to 4KB"
-#nvme format -f --ses=1 --lbaf=1 $DISK
-wipefs -a $DISK
-sgdisk --zap-all $DISK
+nvme format -f --ses=1 --lbaf=1 $DISK
 
-sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
-sgdisk -n2:0:+64G -t2:8304 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:0 -t3:8300 -c3:"DATA" "$DISK"
-sgdisk -p "$DISK"
+echo "==> 2. Partitioning"
+sgdisk -n1:0:+981M -t1:EF00 "$DISK"
+sgdisk -n2:0:+32G -t2:8304 "$DISK"
+sgdisk -n3:0:+16G -t3:8300 "$DISK"
+sgdisk -n4:0:+64G -t4:8300 "$DISK"
+sgdisk -n5:0:+32G -t5:8300 "$DISK"
+sgdisk -n6:0:0 -t6:8300 "$DISK"
 
-echo "==> 2. Formatting partitions"
-mkfs.fat -n BOOT -F32 "${DISK}1"
-#mkfs.fat -F 32 -s 8 -S 512 -n BOOT ${DISK}p1
-mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}2"
-#mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression -C lz4 ${DISK}p2
-mkfs.xfs -L DATA -f "${DISK}3"
-#mkfs.xfs -L DATA -f ${DISK}p3
+echo "==> 3. Formatting partitions"
+mkfs.fat -F 32 -s 8 -S 512 -n BOOT ${DISK}p1
+mkfs.f2fs -l ROOT -f -t 0 -O extra_attr,compression ${DISK}p2  # -C lz4:4 - not works
+mkfs.xfs -L LIBCACHE -f ${DISK}p3
+mkfs.xfs -L GAMES -f ${DISK}p4
+mkfs.xfs -L VIDEO -f ${DISK}p5
+mkfs.xfs -L DATA -f ${DISK}p6
 
 echo "==>3. Mounting partitions"
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}2" /mnt
-#mount -t f2fs -o defaults,noatime,nodiscard,compress_algorithm=lz4,compress_chksum,fastboot ${DISK}p2 /mnt
-mkdir -p /mnt/{boot,data}
-mount -t vfat -o noatime,nodiratime "${DISK}1" /mnt/boot
-mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}3" /mnt/data
+mount -t f2fs -o defaults,noatime,nodiscard,compress_algorithm=lz4,compress_level=4,compress_chksum,fastboot ${DISK}p2 /mnt
+mkdir -p /mnt/{boot,var/lib,games,video,data}
+mount -t vfat -o defaults,noatime "${DISK}p1" /mnt/boot
+mount -t xfs -o defaults,noatime,logbsize=64k "${DISK}p3" /mnt/var/libcache
 
 echo "==>4. Generating fstab"
 genfstab -L /mnt >> /mnt/etc/fstab
