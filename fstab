@@ -1,32 +1,17 @@
-# /boot - FAT32 (minimal writes, safe)
-LABEL=BOOT  /boot  vfat  relatime,utf8=1  0 2
+# /boot
+UUID=<UUID_BOOT>  /boot     vfat   relatime,utf8=1,errors=remount-ro           0 2
 
 # / (root) - F2FS with LZ4 compression
-# OS optimized for low write amplification + speed
-LABEL=ROOT  /  f2fs  relatime,compress_algorithm=lz4,compress_chksum,discard=async  0 1
+UUID=<UUID_ROOT>  /         f2fs   relatime,compress_algorithm=lz4,compress_chksum,discard=async,inline_xattr,inline_dentry  0 1
 
-# /pkgcache - XFS for pacman/paru cache
-# Balanced for SSD lifespan
-LABEL=PKGCACHE  /pkgcache  xfs  relatime,allocsize=256k,discard=async  0 2
+# /pkgcache - XFS
+UUID=<UUID_PKGCACHE>  /pkgcache  xfs  relatime,allocsize=256k,discard=async  0 2
 
-# /steam - XFS for large sequential reads (games)
-# Moderate writes + SSD-friendly
-LABEL=STEAM  /steam  xfs  relatime,allocsize=1m,discard=async  0 2
+# /steam - XFS
+UUID=<UUID_STEAM>  /steam     xfs  relatime,allocsize=1m,discard=async  0 2
 
-# /video - XFS heavy sequential writes (video editing)
-# SSD-friendly journaling
-LABEL=VIDEO  /video  xfs  relatime,allocsize=4m,discard=async  0 2
+# /video - XFS
+UUID=<UUID_VIDEO>  /video     xfs  relatime,allocsize=4m,discard=async  0 2
 
-# /data - F2FS with ZSTD compression (ETL, analytics)
-# Low write amplification + compression saves power
-LABEL=DATA  /data  f2fs  relatime,compress_algorithm=zstd,compress_chksum,discard=async  0 2
-
-
-LABEL=ROOT / f2fs noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry 0 1
-LABEL=VARLIB /var/lib xfs noatime,nodiratime,discard,inode64 0 2
-LABEL=HOME /home f2fs noatime,nodiratime,compress_algorithm=lz4,compress_chksum,discard,inline_xattr,inline_data,inline_dentry 0 0
-LABEL=BUILDS /builds xfs noatime,nodiratime,inode64,attr2,swalloc 0 2
-LABEL=BOOT /boot vfat umask=0077,noatime,iocharset=utf8,errors=remount-ro 0 2
-LABEL=DATA /data xfs noauto,noatime,nodiratime,inode64,swalloc 0 0
-tmpfs /rambuilds tmpfs defaults,noatime,mode=1777,size=50G 0 0
-tmpfs /var/cache tmpfs defaults,noatime,mode=1777 0 0
+# /data - F2FS with ZSTD
+UUID=<UUID_DATA>   /data      f2fs  relatime,compress_algorithm=zstd,compress_chksum,discard=async  0 2
