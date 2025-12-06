@@ -12,30 +12,38 @@ timedatectl set-ntp true
 echo "==> 1. Secure erase + setting the block size to 4KB"
 nvme format -f --ses=1 --lbaf=1 $DISK
 
-sgdisk -n1:0:+1981M -t1:EF00 -c1:"BOOT" "$DISK"
-sgdisk -n2:0:+40G -t2:8300 -c2:"ROOT" "$DISK"
-sgdisk -n3:0:+16G -t3:8300 -c3:"VARLIB" "$DISK"
-sgdisk -n4:0:+24G -t4:8300 -c4:"HOME" "$DISK"
-sgdisk -n5:0:+18G -t5:8300 -c5:"BUILDS" "$DISK"
+sgdisk -n1:0:+981M -t1:EF00 -c1:"BOOT" "$DISK"
+sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
+sgdisk -n3:0:+16G -t3:8300 -c3:"PKGCACHE" "$DISK"
+sgdisk -n4:0:+24G -t4:8300 -c4:"STEAM" "$DISK"
+sgdisk -n5:0:+18G -t5:8300 -c5:"VIDEO" "$DISK"
 sgdisk -n6:0:0 -t6:8300 -c6:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
-mkfs.fat -n BOOT -F32 "${DISK}p1"
-mkfs.f2fs -l ROOT -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"
-mkfs.xfs -L VARLIB -f "${DISK}p3"
-mkfs.f2fs -l HOME -f -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p4"
-mkfs.xfs -L BUILDS "${DISK}p5"
-mkfs.xfs -L DATA -f "${DISK}p6"
+mkfs.fat -F32 -n BOOT "${DISK}p1"
+mkfs.f2fs -f -l ROOT -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"   # try to use: -o compress_algorithm=lz4
+mkfs.xfs -f -L PKGCACHE "${DISK}p3"
+mkfs.xfs -f -l STEAM "${DISK}p4"
+mkfs.xfs -f -L VIDEO "${DISK}p5"
+mkfs.f2fs -f -L DATA -O extra_attr,inode_checksum,sb_checksum,compression   # try to use: -o compress_algorithm=zstd "${DISK}p6"
 
 echo "==>3. Mounting partitions"
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p2" /mnt
-mkdir -p /mnt/{boot,var/lib,home,builds,data}
-mount -t vfat -o noatime,nodiratime "${DISK}p1" /mnt/boot
-mount -t xfs -o noatime,nodiratime,inode64 "${DISK}p3" /mnt/var/lib
-mount -t f2fs -o noatime,nodiratime,compress_algorithm=lz4,compress_chksum "${DISK}p4" /mnt/home
-mount -t xfs -o noatime,nodiratime,discard,inode64 "${DISK}p5" /mnt/builds
-mount -t xfs -o noatime,nodiratime,inode64,logbsize=64k "${DISK}p6" /mnt/data
+
+echo "==> Mounting root"
+mount -t f2fs -o relatime,compress_algorithm=lz4,compress_chksum,discard=async /dev/nvme0n1p2 /mnt
+mkdir -p /mnt/{boot,pkgcache,steam,video,data}
+echo "==> Mounting /boot"
+mount -t vfat -o relatime,utf8=1 /dev/nvme0n1p1 /mnt/boot
+echo "==> Mounting /pkgcache"
+mount -t xfs -o relatime,allocsize=256k,discard=async /dev/nvme0n1p3 /mnt/pkgcache
+echo "==> Mounting /steam"
+mount -t xfs -o relatime,allocsize=1m,discard=async /dev/nvme0n1p4 /mnt/steam
+echo "==> Mounting /video"
+mount -t xfs -o relatime,allocsize=4m,discard=async /dev/nvme0n1p5 /mnt/video
+echo "==> Mounting /data"
+mount -t f2fs -o relatime,compress_algorithm=zstd,compress_chksum,discard=async /dev/nvme0n1p6 /mnt/data
+
 
 echo "==>4. Installing base system + packages"
 pacstrap /mnt \
