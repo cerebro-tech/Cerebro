@@ -50,13 +50,14 @@ pacstrap /mnt \
   base base-devel linux-lts linux-lts-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
   intel-ucode nvidia-dkms nvidia-utils \
-  networkmanager ly \
-  gnome-shell gnome-session gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
+  ly \
+  gnome-shell networkmanager switcheroo-control gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
+  gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
   xdg-desktop-portal-gnome xdg-utils \
   xorg xorg-xinit xorg-xwayland \
   ccache mold ninja --noconfirm --needed
-
+  
 echo "==>5. Generating fstab"
 genfstab -U /mnt >> /mnt/etc/fstab
 
