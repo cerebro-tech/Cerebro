@@ -115,13 +115,19 @@ systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 
 
 echo "==>10. Boot entry creating"
-efibootmgr -c -d /dev/nvme0n1 -p 1 \
-  -L "Cerebro LTS" \
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS 2" \
   -l '\vmlinuz-linux-lts' \
   -u "root=LABEL=ROOT rw rootfstype=f2fs \
-      rootflags=compress_algorithm=lz4,compress_chksum,atgc,inline_xattr,flush_merge \
-      initrd=\initramfs-linux-lts.img \
-      quiet loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
+      rootflags=compress_algorithm=lz4,compress_chksum,inline_xattr,inline_dentry,discard=async \
+      i915.enable_dpcd_backlight=1 i915.enable_psr=1 i915.enable_fbc=1 i915.enable_guc=3 \
+      nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1 \
+      intel_pstate=active intel_pstate=guided \
+      iommu=pt liburing.force_io_uring=1 nvme.pcie_gen=3 \
+      rd.systemd.show_status=false nmi_watchdog=0 nowatchdog \
+      tsc=reliable random.trust_cpu=on \
+      processor.max_cstate=1 idle=nomwait nvme_core.default_ps_max_latency_us=0 rcu_nocbs=0-7 nohz=off \
+      initrd=\initramfs-linux-lts.img quiet loglevel=3"
+
 
 systemctl enable NetworkManager ly.service || true
 
