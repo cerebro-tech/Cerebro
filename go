@@ -52,7 +52,7 @@ pacstrap /mnt \
   intel-ucode mesa mesa-utils mesa-vdpau libva-intel-driver intel-media-driver libva-utils \
   nvidia-dkms nvidia-utils nvidia-settings \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
-  ly \
+  ly zsh\
   gnome-shell networkmanager switcheroo-control \
   gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
   gnome-control-center gnome-settings-daemon gnome-tweaks \
