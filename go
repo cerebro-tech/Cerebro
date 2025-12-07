@@ -49,14 +49,18 @@ echo "==>4. Installing base system + packages"
 pacstrap /mnt \
   base base-devel linux-lts linux-lts-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
-  intel-ucode nvidia-dkms nvidia-utils \
+  intel-ucode mesa mesa-utils mesa-vdpau libva-intel-driver intel-media-driver libva-utils \
+  nvidia-dkms nvidia-utils nvidia-settings \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   ly \
-  gnome-shell networkmanager switcheroo-control gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
-  gnome-control-center gnome-settings-daemon gnome-tweaks gnome-console gnome-system-monitor gnome-text-editor nautilus \
+  gnome-shell networkmanager switcheroo-control \
+  gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
+  gnome-control-center gnome-settings-daemon gnome-tweaks \
+  gnome-console gnome-system-monitor gnome-text-editor nautilus mpv \
   xdg-desktop-portal-gnome xdg-utils \
-  xorg xorg-xinit xorg-xwayland \
+  xorg-xwayland xorg-xinit \
   ccache mold ninja --noconfirm --needed
+
   
 echo "==>5. Generating fstab"
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -83,7 +87,11 @@ chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
 echo "==>7. Initramfs Customization"
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
+
+# HOOKS optimized for Intel + NVIDIA + F2FS + GNOME/Wayland
+sed -i 's/^HOOKS=.*/HOOKS=(base udev kms autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
+
+# Fast initramfs compression
 sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
 sed -i 's/^#COMPRESSION_OPTIONS=.*/COMPRESSION_OPTIONS=(-4)/' /etc/mkinitcpio.conf
 
@@ -91,14 +99,20 @@ echo "==>8. Generate Initramfs for all kernels"
 mkinitcpio -P
 
 echo "==>9. Systemd tuning"
-sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=7s/' /etc/systemd/system.conf
-sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=7s/' /etc/systemd/system.conf
-systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+sed -i 's/^#DefaultTimeoutStartSec=.*/DefaultTimeoutStartSec=20s/' /etc/systemd/system.conf
+sed -i 's/^#DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=15s/' /etc/systemd/system.conf
+# Disable only the correct wait-online service for your setup
+systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+
 
 echo "==>10. Boot entry creating"
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS" \
-    -l /vmlinuz-linux-lts \
-    -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux-lts.img"
+efibootmgr -c -d /dev/nvme0n1 -p 1 \
+  -L "Cerebro LTS" \
+  -l '\vmlinuz-linux-lts' \
+  -u "root=LABEL=ROOT rw rootfstype=f2fs \
+      rootflags=compress_algorithm=lz4,compress_chksum,atgc,inline_xattr,flush_merge \
+      initrd=\initramfs-linux-lts.img \
+      quiet loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
 
 systemctl enable NetworkManager ly.service || true
 
@@ -109,6 +123,4 @@ echo "==> 12. Finalize & cleanup"
 umount -R /mnt || true
 
 echo "Installation finished."
-echo "- Consider adding kernel cmdline options (via firmware/efibootmgr):"
-echo "- quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"
 echo "Reboot when ready."
