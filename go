@@ -96,7 +96,6 @@ chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 
 echo "==>7. Initramfs Customization"
-
 # HOOKS optimized for Intel + NVIDIA + F2FS + GNOME/Wayland
 sed -i 's/^HOOKS=.*/HOOKS=(base udev kms autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
 
