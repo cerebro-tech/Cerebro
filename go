@@ -12,6 +12,7 @@ timedatectl set-ntp true
 echo "==> 1. Secure erase + setting the block size to 4KB"
 nvme format -f --ses=1 --lbaf=1 $DISK
 
+echo "==> 1.1 Disk Partitioning"
 sgdisk -n1:0:+981M -t1:EF00 -c1:"BOOT" "$DISK"
 sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
 sgdisk -n3:0:+16G -t3:8300 -c3:"PKGCACHE" "$DISK"
@@ -22,14 +23,13 @@ sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
 mkfs.fat -F32 -n BOOT "${DISK}p1"
-mkfs.f2fs -f -l ROOT -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"   # try to use: -o compress_algorithm=lz4
+mkfs.f2fs -f -l ROOT -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"
 mkfs.xfs -f -L PKGCACHE "${DISK}p3"
 mkfs.xfs -f -l STEAM "${DISK}p4"
 mkfs.xfs -f -L VIDEO "${DISK}p5"
-mkfs.f2fs -f -L DATA -O extra_attr,inode_checksum,sb_checksum,compression   # try to use: -o compress_algorithm=zstd "${DISK}p6"
+mkfs.f2fs -f -L DATA -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p6"
 
-echo "==>3. Mounting partitions"
-
+echo "==>3. Mounting Partitions"
 echo "==> Mounting root"
 mount -t f2fs -o relatime,compress_algorithm=lz4,compress_chksum,discard=async /dev/nvme0n1p2 /mnt
 mkdir -p /mnt/{boot,pkgcache,steam,video,data}
@@ -72,6 +72,15 @@ set -euo pipefail
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/fstab > /etc/fstab
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/makepkg.conf > /etc/makepkg.conf
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/pacman.conf > /etc/pacman.conf
+
+# 6.1 Timezone
+ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime
+hwclock --systohc
+
+# 6.2 Locale
+sed -i '/^#en_US.UTF-8 UTF-8/s/^#//' /etc/locale.gen
+locale-gen
+echo LANG=en_US.UTF-8 > /etc/locale.conf
 
 echo "cerebro" > /etc/hostname
 useradd -m -G wheel,audio,video,storage,network,power -s /bin/zsh "$USERNAME"
