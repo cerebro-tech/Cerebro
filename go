@@ -32,7 +32,7 @@ mkfs.xfs -f -L PKGCACHE "${DISK}p3"
 echo "==>3. Mounting Partitions"
 echo "==> Mounting root"
 mount -t f2fs -o relatime,compress_algorithm=lz4,compress_chksum,discard=async /dev/nvme0n1p2 /mnt
-mkdir -p /mnt/{boot,pkgcache,steam,video,data}
+mkdir -p /mnt/{boot,pkgcache}
 echo "==> Mounting /boot"
 mount -t vfat -o relatime,utf8=1 /dev/nvme0n1p1 /mnt/boot
 echo "==> Mounting /pkgcache"
@@ -47,21 +47,22 @@ mount -t xfs -o relatime,allocsize=256k,discard=async /dev/nvme0n1p3 /mnt/pkgcac
 
 echo "==>4. Installing base system + packages"
 # mesa mesa-utils mesa-vdpau libva-intel-driver intel-media-driver libva-utils
+# switcheroo-control
 pacstrap /mnt \
-  base base-devel linux-lts linux-lts-headers \
-  xfsprogs dosfstools efibootmgr sudo nano zsh \
-  intel-ucode \
-  nvidia-dkms nvidia-utils nvidia-settings \
-  pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
-  ly zsh\
-  gnome-shell networkmanager switcheroo-control \
-  gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
-  gnome-control-center gnome-settings-daemon gnome-tweaks \
-  gnome-console gnome-system-monitor gnome-text-editor nautilus mpv \
-  xdg-desktop-portal-gnome xdg-utils \
-  xorg-xwayland xorg-xinit \
-  ccache mold ninja --noconfirm --needed
-
+base base-devel linux-lts linux-lts-headers \
+xfsprogs dosfstools efibootmgr sudo nano zsh \
+intel-ucode \
+mesa vulkan-intel intel-media-driver libva-intel-driver xf86-video-intel \
+nvidia-dkms nvidia-utils lib32-nvidia-utils nvidia-settings \
+pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
+ly zsh\
+gnome-shell networkmanager \
+gst-plugin-pipewire gst-plugins-good power-profiles-daemon \
+gnome-control-center gnome-settings-daemon gnome-tweaks \
+gnome-console gnome-system-monitor gnome-text-editor nautilus mpv \
+xdg-desktop-portal-gnome xdg-utils \
+xorg-xwayland xorg-xinit \
+ccache mold ninja --noconfirm --needed
   
 echo "==>5. Generating fstab"
 genfstab -U /mnt >> /mnt/etc/fstab
