@@ -115,7 +115,7 @@ systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 
 
 echo "==>10. Boot entry creating"
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS" -l '\vmlinuz-linux-lts' \
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro-LTS" -l '\vmlinuz-linux-lts' \
 -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux.img"
 
 #-u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4 \
