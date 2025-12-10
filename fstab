@@ -11,10 +11,10 @@ LABEL=BOOT      /boot      vfat   relatime,utf8=1,errors=remount-ro     0 2
 LABEL=STEAM     /steam     xfs    noauto,relatime,allocsize=1m,discard=async    0 2
 
 # /video — XFS (video editing/rendering, huge files)
-LABEL=VIDEO     /video     xfs    noauto,relatime,allocsize=4m,discard=async    0 2
+#LABEL=VIDEO     /video     xfs    noauto,relatime,allocsize=4m,discard=async    0 2
 
 # /data — F2FS (ZSTD compression, ETL/data analytics)
-LABEL=DATA      /data      f2fs   noauto,relatime,compress_algorithm=zstd,compress_chksum,discard=async   0 2
+#LABEL=DATA      /data      f2fs   noauto,relatime,compress_algorithm=zstd,compress_chksum,discard=async   0 2
 
 # tmpfs overlays (RAM-backed storage for performance + SSD wear reduction)
 tmpfs           /var/cache     tmpfs   noatime,mode=1777     0 0
