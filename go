@@ -10,7 +10,7 @@ echo "==> 0. Enabling NTP"
 timedatectl set-ntp true
 
 echo "==> 1. Secure erase + setting the block size to 4KB"
-nvme format -f --ses=1 --lbaf=1 $DISK
+nvme format -f --ses=2 --lbaf=1 $DISK
 
 echo "==> 1.1 Disk Partitioning"
 sgdisk -n1:0:+981M -t1:EF00 -c1:"BOOT" "$DISK"
