@@ -16,18 +16,18 @@ echo "==> 1.1 Disk Partitioning"
 sgdisk -n1:0:+981M -t1:EF00 -c1:"BOOT" "$DISK"
 sgdisk -n2:0:+32G -t2:8300 -c2:"ROOT" "$DISK"
 sgdisk -n3:0:+16G -t3:8300 -c3:"PKGCACHE" "$DISK"
-sgdisk -n4:0:+24G -t4:8300 -c4:"STEAM" "$DISK"
-sgdisk -n5:0:+18G -t5:8300 -c5:"VIDEO" "$DISK"
-sgdisk -n6:0:0 -t6:8300 -c6:"DATA" "$DISK"
+#sgdisk -n4:0:+24G -t4:8300 -c4:"STEAM" "$DISK"
+#sgdisk -n5:0:+18G -t5:8300 -c5:"VIDEO" "$DISK"
+#sgdisk -n6:0:0 -t6:8300 -c6:"DATA" "$DISK"
 sgdisk -p "$DISK"
 
 echo "==> 2. Formatting partitions"
 mkfs.fat -F32 -n BOOT "${DISK}p1"
 mkfs.f2fs -f -l ROOT -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p2"
 mkfs.xfs -f -L PKGCACHE "${DISK}p3"
-mkfs.xfs -f -l STEAM "${DISK}p4"
-mkfs.xfs -f -L VIDEO "${DISK}p5"
-mkfs.f2fs -f -L DATA -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p6"
+#mkfs.xfs -f -l STEAM "${DISK}p4"
+#mkfs.xfs -f -L VIDEO "${DISK}p5"
+#mkfs.f2fs -f -L DATA -O extra_attr,inode_checksum,sb_checksum,compression "${DISK}p6"
 
 echo "==>3. Mounting Partitions"
 echo "==> Mounting root"
@@ -37,19 +37,20 @@ echo "==> Mounting /boot"
 mount -t vfat -o relatime,utf8=1 /dev/nvme0n1p1 /mnt/boot
 echo "==> Mounting /pkgcache"
 mount -t xfs -o relatime,allocsize=256k,discard=async /dev/nvme0n1p3 /mnt/pkgcache
-echo "==> Mounting /steam"
-mount -t xfs -o relatime,allocsize=1m,discard=async /dev/nvme0n1p4 /mnt/steam
-echo "==> Mounting /video"
-mount -t xfs -o relatime,allocsize=4m,discard=async /dev/nvme0n1p5 /mnt/video
-echo "==> Mounting /data"
-mount -t f2fs -o relatime,compress_algorithm=zstd,compress_chksum,discard=async /dev/nvme0n1p6 /mnt/data
+#echo "==> Mounting /steam"
+#mount -t xfs -o relatime,allocsize=1m,discard=async /dev/nvme0n1p4 /mnt/steam
+#echo "==> Mounting /video"
+#mount -t xfs -o relatime,allocsize=4m,discard=async /dev/nvme0n1p5 /mnt/video
+#echo "==> Mounting /data"
+#mount -t f2fs -o relatime,compress_algorithm=zstd,compress_chksum,discard=async /dev/nvme0n1p6 /mnt/data
 
 
 echo "==>4. Installing base system + packages"
+# mesa mesa-utils mesa-vdpau libva-intel-driver intel-media-driver libva-utils
 pacstrap /mnt \
   base base-devel linux-lts linux-lts-headers \
   xfsprogs dosfstools efibootmgr sudo nano zsh \
-  intel-ucode mesa mesa-utils mesa-vdpau libva-intel-driver intel-media-driver libva-utils \
+  intel-ucode \
   nvidia-dkms nvidia-utils nvidia-settings \
   pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber \
   ly zsh\
@@ -114,14 +115,15 @@ systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 
 
 echo "==>10. Boot entry creating"
-efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS 3" -l '\vmlinuz-linux-lts' \
--u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4 \
-i915.enable_dpcd_backlight=1 i915.enable_psr=1 i915.enable_fbc=1 i915.enable_guc=3 \
-nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1 \
-intel_pstate=active intel_pstate=guided tsc=reliable random.trust_cpu=on processor.max_cstate=1 idle=nomwait rcu_nocbs=0-7 nohz=off \
-iommu=pt liburing.force_io_uring=1 nvme.pcie_gen=3 rd.systemd.show_status=false nmi_watchdog=0 nowatchdog nvme_core.default_ps_max_latency_us=0 \
-initrd=\initramfs-linux-lts.img quiet loglevel=3"
+efibootmgr -c -d /dev/nvme0n1 -p 1 -L "Cerebro LTS" -l '\vmlinuz-linux-lts' \
+-u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux.img"
 
+#-u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4 \
+#i915.enable_dpcd_backlight=1 i915.enable_psr=1 i915.enable_fbc=1 i915.enable_guc=3 \
+#nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1 \
+#intel_pstate=active intel_pstate=guided tsc=reliable random.trust_cpu=on processor.max_cstate=1 idle=nomwait rcu_nocbs=0-7 nohz=off \
+#iommu=pt liburing.force_io_uring=1 nvme.pcie_gen=3 rd.systemd.show_status=false nmi_watchdog=0 nowatchdog nvme_core.default_ps_max_latency_us=0 \
+#initrd=\initramfs-linux-lts.img quiet loglevel=3"
 
 systemctl enable NetworkManager ly.service || true
 
