@@ -58,7 +58,7 @@ mesa-utils vulkan-tools base-devel efibootmgr networkmanager zsh nano git reflec
 pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber gst-plugin-pipewire rtkit \
 ccache mold ninja \
 gnome-shell gdm gnome-tweaks gnome-text-editor gnome-system-monitor nautilus mpv \
-ttf-dejavu ttf-liberation --noconfirm --needed
+ttf-dejavu --noconfirm --needed
 #
 echo "==>5. Generating fstab"
 genfstab -L /mnt >> /mnt/etc/fstab
