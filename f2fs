@@ -87,6 +87,13 @@ efibootmgr -c -d $DISK -p 1 -L "Cerebro Arch" \
     -l /vmlinuz-linux \
     -u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4,compress_chksum quiet loglevel=3 initrd=\initramfs-linux.img"
 
+#-u "root=LABEL=ROOT rw rootfstype=f2fs rootflags=compress_algorithm=lz4 \
+#i915.enable_dpcd_backlight=1 i915.enable_psr=1 i915.enable_fbc=1 i915.enable_guc=3 \
+#nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1 \
+#intel_pstate=active intel_pstate=guided tsc=reliable random.trust_cpu=on processor.max_cstate=1 idle=nomwait rcu_nocbs=0-7 nohz=off \
+#iommu=pt liburing.force_io_uring=1 nvme.pcie_gen=3 rd.systemd.show_status=false nmi_watchdog=0 nowatchdog nvme_core.default_ps_max_latency_us=0 \
+#initrd=\initramfs-linux-lts.img quiet loglevel=3"
+
 systemctl enable NetworkManager ly.service || true
 
 echo "==>11. Chroot configuration done"
