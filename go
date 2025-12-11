@@ -74,9 +74,12 @@ curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/pacman.conf 
 echo "==>6.0 Creating persistent build and cache directories"
 #
 # Persistent directories on /pkgcache
-mkdir -p /pkgcache/paru         # Output of future AUR builds (PKGDEST)
-mkdir -p /pkgcache/src          # Source tarballs / git repos
-mkdir -p /pkgcache/log          # Build logs
+# Output of future AUR builds (PKGDEST)
+mkdir -p /pkgcache/paru
+# Source tarballs / git repos
+mkdir -p /pkgcache/src
+# Build logs
+mkdir -p /pkgcache/log
 #
 # Persistent pacman cache
 mkdir -p /pkgcache/pacman
