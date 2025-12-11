@@ -71,14 +71,47 @@ curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/fstab > /etc
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/makepkg.conf > /etc/makepkg.conf
 curl -s https://raw.githubusercontent.com/cerebro-tech/Cerebro/main/pacman.conf > /etc/pacman.conf
 #
+echo "==>6.0 Creating persistent build and cache directories"
+#
+# Persistent directories on /pkgcache
+mkdir -p /pkgcache/paru         # Output of future AUR builds (PKGDEST)
+mkdir -p /pkgcache/src          # Source tarballs / git repos
+mkdir -p /pkgcache/log          # Build logs
+#
+# Persistent pacman cache
+mkdir -p /pkgcache/pacman
+#
+# RAM-backed build directory
+mkdir -p /rambuild
+#
+# Set ownership to your user
+chown -R ${USERNAME}:${USERNAME} /pkgcache
+chown -R ${USERNAME}:${USERNAME} /rambuild
+#
+# Set permissions
+# all subdirs writable by owner
+chmod -R 755 /pkgcache
+# sticky bit, multi-user safe
+chmod 1777 /rambuild
+#
+# Setup pacman cache symlink to persistent storage
+# Ensure /var/cache exists (tmpfs created on boot)
+mkdir -p /var/cache/pacman
+#
+# Remove default pkg folder in tmpfs (only if exists)
+rm -rf /var/cache/pacman/pkg || true
+#
+# Create symlink to persistent XFS cache
+ln -sf /pkgcache/pacman /var/cache/pacman/pkg
+#
 # 6.1 Timezone
 ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime
 hwclock --systohc
 #
 # 6.2 Locale
-sed -i '/^#en_US.UTF-8 UTF-8/s/^#//' /etc/locale.gen
+sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen || true
 locale-gen
-echo LANG=en_US.UTF-8 > /etc/locale.conf
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
 #
 echo "cerebro" > /etc/hostname
 useradd -m -G wheel,audio,video,storage,network,power -s /bin/zsh "$USERNAME"
@@ -94,7 +127,7 @@ chmod 440 /etc/sudoers.d/10-wheel
 visudo -c || true
 #
 echo "==>7. Initramfs Customization"
-# HOOKS optimized for Intel + NVIDIA + F2FS + GNOME/Wayland
+# HOOKS optimized for Intel + NVIDIA + F2FS + GNOME
 sed -i 's/^HOOKS=.*/HOOKS=(base udev kms autodetect microcode modconf block filesystems keyboard)/' /etc/mkinitcpio.conf
 # Fast initramfs compression
 sed -i 's/^#COMPRESSION=.*/COMPRESSION="lz4"/' /etc/mkinitcpio.conf
@@ -123,5 +156,4 @@ CHROOT_EOF
 echo "==> 12. Finalize & cleanup"
 umount -R /mnt || true
 #
-echo "Installation finished."
-echo "Reboot when ready."
+echo "Installation finished. Reboot."
