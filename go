@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+sudo systemctl enable --now bluetooth.servic#!/usr/bin/env bash
 set -euo pipefail
 #
 DISK="/dev/nvme0n1"
@@ -34,31 +34,30 @@ mkfs.xfs -f -L PKGCACHE "${DISK}p3"
 #
 echo "==>3. Mounting Partitions"
 echo "==> Mounting root"
-mount -t f2fs -o defaults,noatime,nodiscard,compress_algorithm=lz4,compress_level=4,compress_chksum,fastboot /dev/nvme0n1p2 /mnt
-mkdir -p /mnt/boot
+mount -t f2fs -o defaults,noatime,nodiscard,compress_algorithm=lz4,compress_chksum,fastboot /dev/nvme0n1p2 /mnt
+mkdir -p /mnt/{boot,pkgcache}
 echo "==> Mounting /boot"
 mount -t vfat -o relatime,utf8=1 /dev/nvme0n1p1 /mnt/boot
 echo "==> Mounting /pkgcache"
-mount -t xfs -o relatime,allocsize=256k,discard=async /dev/nvme0n1p3 /mnt/pkgcache
+mount -t xfs -o relatime,allocsize=256k,allocsize=1m /dev/nvme0n1p3 /mnt/pkgcache
 #
 #echo "==> Mounting /steam"
-#mount -t xfs -o relatime,allocsize=1m,discard=async /dev/nvme0n1p4 /mnt/steam
+#mount -t xfs -o relatime,allocsize=1m /dev/nvme0n1p4 /mnt/steam
 #echo "==> Mounting /video"
-#mount -t xfs -o relatime,allocsize=4m,discard=async /dev/nvme0n1p5 /mnt/video
+#mount -t xfs -o relatime,allocsize=4m /dev/nvme0n1p5 /mnt/video
 #echo "==> Mounting /data"
-#mount -t f2fs -o relatime,compress_algorithm=zstd,compress_chksum,discard=async /dev/nvme0n1p6 /mnt/data
+#mount -t f2fs -o relatime,compress_algorithm=zstd,compress_chksum /dev/nvme0n1p6 /mnt/data
 #
 echo "==>4. Installing base system + packages"
 pacstrap /mnt base linux-lts linux-lts-headers \
 intel-ucode linux-firmware-intel linux-firmware-nvidia \
 mesa intel-media-driver vulkan-intel lib32-vulkan-intel \
-nvidia-lts nvidia-utils lib32-nvidia-utils nv-codec-headers \
+nvidia-lts nvidia-utils lib32-nvidia-utils \
 vulkan-icd-loader lib32-vulkan-icd-loader \
 mesa-utils vulkan-tools base-devel efibootmgr networkmanager zsh nano git reflector \
 pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber gst-plugin-pipewire rtkit \
 ccache mold ninja \
-gnome-shell gdm gnome-tweaks gnome-text-editor gnome-system-monitor nautilus mpv \
-ttf-dejavu --noconfirm --needed
+gnome-shell gdm gnome-tweaks gnome-text-editor gnome-system-monitor nautilus mpv --noconfirm --needed
 #
 echo "==>5. Generating fstab"
 genfstab -L /mnt >> /mnt/etc/fstab
