@@ -1,0 +1,106 @@
+# ──────────────────────────────
+# 📦 Powerlevel10k Instant Prompt
+# ──────────────────────────────
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# ──────────────────────────────
+# ⚙️ Base Environment Setup
+# ──────────────────────────────
+export EDITOR="nano"
+export PAGER="less"
+export PATH="$HOME/my_scripts:$PATH"
+
+# ──────────────────────────────
+# 🗄️ History Settings (Added)
+# ──────────────────────────────
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=50000
+SAVEHIST=50000
+setopt APPEND_HISTORY
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_SPACE
+setopt HIST_IGNORE_ALL_DUPS
+
+# ──────────────────────────────
+# 🎨 Powerlevel10k Theme
+# ──────────────────────────────
+source /usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme
+
+# ──────────────────────────────
+# 🔧 Plugin Settings (Moved up)
+# ──────────────────────────────
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=24
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+
+zstyle ':autocomplete:*' fzf-completion yes
+zstyle ':autocomplete:*' widget-style menu-select
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+
+# ──────────────────────────────
+# 🔌 Zgenom & Plugin Load
+# ──────────────────────────────
+ZGEN_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zgenom"
+{
+source ~/.zgenom/zgenom.zsh
+zgenom load zsh-users/zsh-completions
+zgenom load zsh-users/zsh-autosuggestions
+zgenom load marlonrichert/zsh-autocomplete
+zgenom load zdharma-continuum/fast-syntax-highlighting
+
+if ! zgenom saved; then
+  zgenom save
+fi
+} 2>/dev/null
+
+# ──────────────────────────────
+# ⚙️ Zsh Options
+# ──────────────────────────────
+setopt no_beep
+setopt prompt_subst
+
+# ──────────────────────────────
+# ⌨️ Keybindings
+# ──────────────────────────────
+bindkey '^?' backward-delete-char      # Backspace
+bindkey '^[[3~' delete-char            # Delete key
+bindkey '^[[1;5C' forward-word         # Ctrl + Right arrow
+bindkey '^[[1;5D' backward-word        # Ctrl + Left arrow
+
+# ──────────────────────────────
+# 🔁 Aliases & Tools
+# ──────────────────────────────
+alias ls='ls --color=auto'
+alias la='ls -la'
+alias please='sudo'
+alias dobackup='sudo /home/j/my_scripts/Do_Backup/cerebro_backup.sh'
+
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+
+# ──────────────────────────────
+# 🚀 Git Automation Function
+# ──────────────────────────────
+unalias dogit 2>/dev/null
+dogit() {
+  local msg
+  cd /home/j/my_scripts || return
+  
+  local branch=$(git branch --show-current)
+  
+  echo "Enter commit message:"
+  read -r msg
+  
+  git pull origin "$branch"
+  git add -A
+  if git diff --cached --quiet; then
+    echo "No changes to commit."
+  else
+    git commit -m "$msg"
+    git push origin "$branch"
+  fi
+  
+  cd - > /dev/null
+}
