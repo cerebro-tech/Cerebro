@@ -1,0 +1,5 @@
+#/etc/default/cpupower
+
+governor='powersave'
+min_freq="800MHz"
+max_freq="2.99GHz"
